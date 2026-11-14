@@ -1,5 +1,5 @@
 import {auth, db, ADMIN_EMAIL} from "./firebase.js";
-import {createUserWithEmailAndPassword, signInWithEmailAndPassword} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import {createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {doc, getDoc, writeBatch, serverTimestamp} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {$, state, ic} from "./ui.js";
 
@@ -22,15 +22,16 @@ export function renderAuth(el, onDone){
   const v = id => { const x = $("#" + id, el); return x ? x.value : ""; };
   const draw = () => {
     const lg = mode === "login";
-    el.innerHTML = `<div class="card auth"><svg class="lg" viewBox="0 0 64 64" role="img" aria-label="Examora"><use href="#lg"/></svg><div class="name">Examora</div><h1>${lg ? "مرحباً بعودتك" : "إنشاء حساب جديد"}</h1><p class="sub">${lg ? "سجّل الدخول لمتابعة رحلتك التعليمية" : "اختار نوع حسابك وكمّل بياناتك"}</p><form id="f" novalidate>${lg ? fld("id","الإيميل أو رقم الهاتف","user","text",'autocomplete="username"') + fld("pw","كلمة السر","lock","password",'autocomplete="current-password"',true) : `<div class="roles">${[["student","طالب","cap"],["teacher","مدرس","board"]].map(([k,t,i]) => `<button type="button" data-r="${k}" class="${k===role?"on":""}">${ic(i,24)}<span>${t}</span></button>`).join("")}</div>${fields(role)}`}<p id="msg" class="err" role="alert"></p><button class="btn p full" id="go" type="submit">${ic(lg?"login":"check")}<span>${lg ? "سجّل دخول" : "إنشاء الحساب"}</span></button></form><p class="alt">${lg ? "لا أملك حساب؟" : "لدي حساب؟"} <button type="button" class="lnk" id="sw">${lg ? "إنشاء حساب جديد" : "تسجيل الدخول"}</button></p></div>`;
+    el.innerHTML = `<div class="card auth"><svg class="lg" viewBox="0 0 64 64" role="img" aria-label="Examora"><use href="#lg"/></svg><div class="name">Examora</div><h1>${lg ? "مرحباً بعودتك" : "إنشاء حساب جديد"}</h1><p class="sub">${lg ? "سجّل الدخول لمتابعة رحلتك التعليمية" : "اختار نوع حسابك وكمّل بياناتك"}</p><form id="f" novalidate>${lg ? fld("id","الإيميل أو رقم الهاتف","user","text",'autocomplete="username"') + fld("pw","كلمة السر","lock","password",'autocomplete="current-password"',true) + '<button type="button" class="lnk fp" id="fp">نسيت كلمة السر؟</button>' : `<div class="roles">${[["student","طالب","cap"],["teacher","مدرس","board"]].map(([k,t,i]) => `<button type="button" data-r="${k}" class="${k===role?"on":""}">${ic(i,24)}<span>${t}</span></button>`).join("")}</div>${fields(role)}`}<p id="msg" class="err" role="alert"></p><button class="btn p full" id="go" type="submit">${ic(lg?"login":"check")}<span>${lg ? "سجّل دخول" : "إنشاء الحساب"}</span></button></form><p class="alt">${lg ? "لا أملك حساب؟" : "لدي حساب؟"} <button type="button" class="lnk" id="sw">${lg ? "إنشاء حساب جديد" : "تسجيل الدخول"}</button></p></div>`;
     Object.entries(keep).forEach(([i, x]) => { const n = $("#" + i, el); if (n) n.value = x; });
     el.querySelectorAll(".eye").forEach(b => b.onclick = () => { const i = b.parentNode.querySelector("input"), s = i.type === "password"; i.type = s ? "text" : "password"; b.innerHTML = ic(s ? "eyeoff" : "eye"); });
     el.querySelectorAll("[data-r]").forEach(b => b.onclick = () => { ["name","phone","email"].forEach(i => { if ($("#" + i, el)) keep[i] = v(i); }); role = b.dataset.r; draw(); });
+    const fp = $("#fp", el); if (fp) fp.onclick = async () => { const msg = $("#msg", el); msg.style.color = ""; msg.textContent = ""; const id = v("id").trim(); if (!id) { msg.textContent = "اكتب الإيميل أو رقمك الأول"; return; } try { let email = id; if (!id.includes("@")) { const p = digits(id); const s = phoneOk(p) ? await getDoc(doc(db, "phones", p)) : null; email = s && s.exists() ? s.data().email : ""; } if (email) await sendPasswordResetEmail(auth, email); msg.style.color = "var(--accent)"; msg.textContent = "لو الحساب موجود، هيوصلك رابط على الإيميل."; } catch (x) { msg.textContent = errMsg(x); } };
     $("#sw", el).onclick = () => { mode = lg ? "register" : "login"; draw(); };
     $("#f", el).onsubmit = async e => {
       e.preventDefault();
       const go = $("#go", el), msg = $("#msg", el);
-      msg.textContent = ""; go.disabled = true;
+      msg.style.color = ""; msg.textContent = ""; go.disabled = true;
       try { const m = lg ? await login(v) : await register(role, v); if (m) msg.textContent = m; else onDone(); }
       catch (x) { msg.textContent = errMsg(x); }
       go.disabled = false;

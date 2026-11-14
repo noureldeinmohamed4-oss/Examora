@@ -8,20 +8,24 @@ const genCode = () => Array.from(crypto.getRandomValues(new Uint8Array(6)), n =>
 const ab = (act, icon, label, id = "", extra = "") => `<button class="ab" type="button" data-act="${act}" data-id="${id}" ${extra} aria-label="${label}">${ic(icon, 18)}</button>`;
 
 export async function renderTeacher(el, uid, d){
-  let lects = [], cur = null, code = d.code;
+  let lects = [], stu = [], cur = null, code = d.code;
   const load = async () => {
     const s = await getDocs(query(collection(db, "lectures"), where("teacherUid", "==", uid)));
     lects = s.docs.map(x => ({id: x.id, ...x.data()})).sort((a, b) => a.order - b.order);
+    const s2 = await getDocs(query(collection(db, "links"), where("teacherUid", "==", uid)));
+    stu = s2.docs.map(x => ({id: x.id, ...x.data()}));
   };
+  const studentsCard = () => { const a = stu.filter(x => x.code === code); return `<div class="card" style="margin-top:14px"><h2 class="h">الطلاب (${a.length})</h2>${a.length ? a.map(x => `<div class="item lrow"><div class="lt"><b>${esc(x.studentName)}</b><small>${x.status === "suspended" ? "موقوف" : "نشط"}</small></div><button class="btn s sm" type="button" data-st="${x.id}" data-to="${x.status === "suspended" ? "active" : "suspended"}">${x.status === "suspended" ? "تفعيل" : "إيقاف"}</button></div>`).join("") : '<p class="muted center">لسه مفيش طلاب. ابعت كودك للطلاب.</p>'}</div>`; };
   const run = async (fn, ok) => { try { await fn(); if (ok) toast(ok); } catch (e) { toast("حصل خطأ، حاول تاني"); } };
   const save = async (l, patch) => { await updateDoc(doc(db, "lectures", l.id), patch); Object.assign(l, patch); };
   const swap = (arr, i, j) => { if (j < 0 || j >= arr.length) return false; [arr[i], arr[j]] = [arr[j], arr[i]]; return true; };
 
   function home(){
     cur = null;
-    el.innerHTML = `<div class="card"><b>${esc(d.name)}</b><small class="muted" style="display:block">مدرس · ${esc(d.subject)}</small><div class="codebox"><div><small class="muted">كودك</small><b class="code" dir="ltr">${esc(code)}</b></div><div class="acts" style="margin:0"><button id="cp" class="btn s sm" type="button">نسخ</button><button id="cc" class="btn s sm" type="button">تغيير</button></div></div></div>
+    el.innerHTML = `<div class="card"><b>${esc(d.name)}</b><small class="muted" style="display:block">مدرس · ${esc(d.subject)}</small><div class="codebox"><div><small class="muted">كودك</small><b class="code" dir="ltr">${esc(code)}</b></div><div class="acts" style="margin:0"><button id="cp" class="btn s sm" type="button">نسخ</button><button id="cc" class="btn s sm" type="button">تغيير</button></div></div></div>${studentsCard()}
 <div class="card" style="margin-top:14px"><h2 class="h">المحاضرات (${lects.length})</h2><div class="addrow"><input id="nt" placeholder="اسم المحاضرة (مثال: المحاضرة الأولى)" aria-label="اسم المحاضرة"><button id="add" class="btn p sm" type="button">إضافة</button></div><div id="ls">${lects.length ? lects.map(l => `<div class="item lrow"><div class="lt" data-act="open" data-id="${l.id}"><b>${esc(l.title)}</b><small>${l.parts.length} أجزاء · ${l.mode === "open" ? "مفتوحة" : "بالترتيب"}${l.hidden ? " · مخفية" : ""}</small></div>${ab("up", "up", "فوق", l.id)}${ab("down", "down", "تحت", l.id)}${ab("hide", l.hidden ? "eyeoff" : "eye", l.hidden ? "إظهار" : "إخفاء", l.id)}${ab("del", "trash", "مسح", l.id)}</div>`).join("") : '<p class="muted center">مفيش محاضرات لسه. أضف أول محاضرة.</p>'}</div></div>`;
     $("#cp", el).onclick = () => navigator.clipboard.writeText(code).then(() => toast("اتنسخ الكود"), () => toast(code));
+    el.querySelectorAll("[data-st]").forEach(b => b.onclick = () => run(async () => { if (b.dataset.to === "suspended" && !confirm("إيقاف الطالب ده من عندك؟")) return; await updateDoc(doc(db, "links", b.dataset.st), {status: b.dataset.to}); stu.find(y => y.id === b.dataset.st).status = b.dataset.to; home(); }));
     $("#cc", el).onclick = () => run(async () => {
       if (!confirm("تغيير الكود هيفصل طلابك الحاليين لحد ما يكتبوا الكود الجديد. متأكد؟")) return;
       let n = null;
