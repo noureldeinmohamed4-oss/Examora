@@ -4,7 +4,7 @@ import {initializeFirestore} from "https://www.gstatic.com/firebasejs/10.12.2/fi
 const firebaseConfig = {
   apiKey: "AIzaSyBqXYg-I3MeD8kzvmDAsLn1mW1jH1IByBA",
   authDomain: "n777-academy.firebaseapp.com",
-  databaseURL: "https://n777-academy-default-rtdb.europe-west1.firebasedatabase.app",
+  databaseURL: "https://n777-academy-default-rtdb.europe-west.firebasedatabase.app",
   projectId: "n777-academy",
   storageBucket: "n777-academy.firebasestorage.app",
   messagingSenderId: "92365891681",
