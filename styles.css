@@ -84,3 +84,8 @@ input:focus-visible,select:focus-visible,button:focus-visible{outline:3px solid 
 .tbl{width:100%;border-collapse:collapse;font-size:14px}
 .tbl th{color:var(--muted);font-weight:600}
 .tbl td,.tbl th{padding:8px 6px;border-top:1px solid var(--line);text-align:start;white-space:nowrap}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--muted)}
+.dot.g{background:#2e9e5b}.dot.y{background:#e0b100}.dot.r{background:#d0382d}
+.im{max-width:100%;border-radius:12px;margin-top:8px;display:block}
+.th{position:relative;display:inline-block}
+.th .ab{position:absolute;top:8px;inset-inline-end:8px}

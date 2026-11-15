@@ -99,12 +99,15 @@ export async function examSolve(el, uid, ex, att, back){
   if (att.submitted) return toast("تم تسليم الامتحان");
   const dl = Math.min(att.startedAt.toMillis() + ex.duration * 60000, ex.end), qs = ex.questions;
   const ans = {...att.answers};
-  let cur = 0, done = false, tm, dbn;
+  let cur = 0, done = false, tm, dbn, hidAt = 0;
+  const exits = [...(att.exits || [])];
+  const vis = () => { if (done) return; if (document.hidden) hidAt = Date.now(); else if (hidAt) { exits.push({t: hidAt, d: Math.round((Date.now() - hidAt) / 1000)}); hidAt = 0; updateDoc(doc(db, "attempts", id), {exits}).catch(() => {}); } };
+  document.addEventListener("visibilitychange", vis);
   el.oncopy = el.oncut = el.onpaste = el.oncontextmenu = e => e.preventDefault();
   const has = q => ans[q.id] != null && ans[q.id] !== "";
   const put = (q, v) => { if (v === null || v === "") { delete ans[q.id]; v = deleteField(); } else ans[q.id] = v; updateDoc(doc(db, "attempts", id), {["answers." + q.id]: v}).catch(() => {}); };
   const finish = () => {
-    if (done) return; done = true; clearInterval(tm);
+    if (done) return; done = true; clearInterval(tm); document.removeEventListener("visibilitychange", vis);
     el.oncopy = el.oncut = el.onpaste = el.oncontextmenu = null;
     updateDoc(doc(db, "attempts", id), {submitted: true, submittedAt: serverTimestamp()}).catch(() => {});
     el.innerHTML = '<div class="card center"><h2 class="h">تم تسليم الامتحان</h2><p class="muted">النتيجة هتظهر بعد ما المدرس يخلّص التصحيح.</p><button id="bk" class="btn p full" type="button">رجوع</button></div>';

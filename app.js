@@ -1,6 +1,6 @@
 import {auth, db, ADMIN_EMAIL} from "./firebase.js";
 import {onAuthStateChanged, signOut} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import {doc, getDoc} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import {doc, getDoc, setDoc, onSnapshot, serverTimestamp} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {$, esc, state, ic} from "./ui.js";
 import {renderAuth} from "./auth.js";
 import {renderAdmin} from "./admin.js";
@@ -17,13 +17,14 @@ lab();
 lo.innerHTML = ic("out");
 lo.onclick = () => signOut(auth);
 
-let pt;
+let pt, sessUid = null, unsub = null;
 async function route(u){
   if (state.busy) return;
   clearTimeout(pt);
   lo.hidden = hb.hidden = !u;
-  if (!u) { if (!$("#f", app)) renderAuth(app, () => route(auth.currentUser)); return; }
+  if (!u) { sessUid = null; if (unsub) { unsub(); unsub = null; } if (!$("#f", app)) renderAuth(app, () => route(auth.currentUser)); return; }
   if (u.email === ADMIN_EMAIL) { if (!$("#ls", app)) renderAdmin(app); return; }
+  if (sessUid !== u.uid) { sessUid = u.uid; if (unsub) unsub(); const SID = crypto.randomUUID(); setDoc(doc(db, "sessions", u.uid), {sid: SID, at: serverTimestamp()}).then(() => { unsub = onSnapshot(doc(db, "sessions", u.uid), s => { if (s.exists() && s.data().sid !== SID) { alert("الحساب اتفتح من جهاز تاني"); signOut(auth); } }); }).catch(() => {}); }
   let s;
   try { s = await getDoc(doc(db, "users", u.uid)); }
   catch (e) { app.innerHTML = '<p class="center err">تعذّر تحميل البيانات. تأكد من الإنترنت.</p>'; return; }
