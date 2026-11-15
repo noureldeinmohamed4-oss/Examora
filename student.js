@@ -1,6 +1,7 @@
 import {db} from "./firebase.js";
 import {collection, query, where, getDocs, doc, getDoc, setDoc, updateDoc, deleteDoc, serverTimestamp} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {$, esc, toast, ic} from "./ui.js";
+import {examSolve} from "./exam.js";
 
 const TYPES = {explain: ["شرح", "vid"], homework: ["واجب", "doc"], exam: ["امتحان", "exam"]};
 
@@ -51,9 +52,24 @@ export async function renderStudent(el, uid, d){
       $("#ad", el).onclick = () => run(async () => { if (await addCode($("#cd", el).value)) teacher(l); });
       return;
     }
-    const row = (p, lk) => `<div class="item lrow${lk ? " lk" : ""}"><span class="ic">${ic(lk ? "lock" : TYPES[p.type][1])}</span><div class="lt"><b>${esc(p.title)}</b><small>${TYPES[p.type][0]}${lk ? " · يفتح بعد اللي قبله" : " · المحتوى قريباً"}</small></div></div>`;
+    const exs = {}, atts = {};
+    try {
+      (await getDocs(query(collection(db, "exams"), where("teacherUid", "==", l.teacherUid), where("published", "==", true)))).docs.forEach(x => { exs[x.id] = {id: x.id, ...x.data()}; });
+      (await getDocs(query(collection(db, "attempts"), where("studentUid", "==", uid)))).docs.forEach(x => { atts[x.data().examId] = x.data(); });
+    } catch (e) {}
+    const fm = ms => new Date(ms).toLocaleString("ar-EG", {dateStyle: "medium", timeStyle: "short"});
+    const exBtn = p => {
+      const e = exs[p.id]; if (!e) return "";
+      const a = atts[p.id], n = Date.now();
+      if (a && a.submitted) return '<span class="muted small">تم التسليم</span>';
+      if (!a && n < e.start) return `<span class="muted small">يبدأ ${fm(e.start)}</span>`;
+      if (n > e.end) return '<span class="muted small">انتهى</span>';
+      return `<button class="btn p sm" type="button" data-sx="${p.id}">${a ? "كمّل" : "ابدأ"}</button>`;
+    };
+    const row = (p, lk) => `<div class="item lrow${lk ? " lk" : ""}"><span class="ic">${ic(lk ? "lock" : TYPES[p.type][1])}</span><div class="lt"><b>${esc(p.title)}</b><small>${TYPES[p.type][0]}${lk ? " · يفتح بعد اللي قبله" : p.type === "exam" && exs[p.id] ? ` · ${exs[p.id].duration} دقيقة` : " · المحتوى قريباً"}</small></div>${!lk && p.type === "exam" ? exBtn(p) : ""}</div>`;
     el.innerHTML = `<div class="card"><button id="bk" class="lnk" type="button">${ic("back", 18)} رجوع</button><h2 class="h" style="margin-top:10px">${esc(l.teacherName)} · ${esc(l.subject)}</h2></div>${lects.length ? lects.map(x => `<div class="card" style="margin-top:14px"><b>${esc(x.title)}</b>${x.parts.length ? x.parts.map((p, i) => row(p, x.mode !== "open" && i > 0)).join("") : '<p class="muted small">لسه مفيش أجزاء.</p>'}</div>`).join("") : '<div class="card" style="margin-top:14px"><p class="muted center">المدرس لسه ما أضافش محاضرات.</p></div>'}`;
     $("#bk", el).onclick = home;
+    el.querySelectorAll("[data-sx]").forEach(b => b.onclick = () => examSolve(el, uid, exs[b.dataset.sx], atts[b.dataset.sx], () => teacher(l)));
   }
 
   el.innerHTML = '<p class="muted center">جاري التحميل…</p>';
