@@ -1,6 +1,7 @@
 import {db} from "./firebase.js";
 import {collection, query, where, getDocs, doc, getDoc, updateDoc, writeBatch} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {$, esc, toast, ic} from "./ui.js";
+import {urlImgs} from "./media.js";
 
 const ms = t => t && t.toMillis ? t.toMillis() : 0;
 const mm = s => Math.floor(s / 60) + ":" + String(Math.floor(s % 60)).padStart(2, "0");
@@ -22,7 +23,7 @@ export async function examResults(el, uid, exam, back){
   const score = a => qs.reduce((s, q) => s + (gr(a, q) || 0), 0);
   const pending = a => qs.some(q => q.type === "essay" && (a.grades || {})[q.id] == null);
   const secs = a => a.submitted && a.submittedAt ? (ms(a.submittedAt) - ms(a.startedAt)) / 1000 : exam.duration * 60;
-  const xs = a => a.exits || [], xt = a => xs(a).reduce((s, x) => s + x.d, 0);
+  const xs = a => (a.exits || []).filter(x => !(x.p && x.d <= 90)), xt = a => xs(a).reduce((s, x) => s + x.d, 0);
   const lvl = a => !xs(a).length ? "g" : xs(a).length <= 2 && xt(a) < 60 ? "y" : "r";
   const ipg = {}; atts.forEach(a => { if (a.ip) (ipg[a.ip] = ipg[a.ip] || []).push(a.studentUid); });
   const same = a => a.ip && ipg[a.ip].length > 1 ? ipg[a.ip].filter(u => u !== a.studentUid).map(u => names[u] || "طالب") : [];
@@ -64,7 +65,7 @@ ${pend ? `<p class="err">فيه ${pend} ورقة مقالي لسه ما اتصح
   function paper(a){
     const show = q => { const v = (a.answers || {})[q.id]; return v == null || v === "" ? "—" : q.type === "mcq" ? esc(q.options[v]) : q.type === "tf" ? (v ? "صح" : "خطأ") : esc(v); };
     const rvw = q => (a.reviews || {})[q.id];
-    el.innerHTML = `<div class="card"><button id="bk" class="lnk" type="button">${ic("back", 18)} رجوع</button><h2 class="h" style="margin-top:10px">${esc(names[a.studentUid] || "طالب")} · ${score(a)} / ${total}</h2>${xs(a).length ? `<p class="muted small">خروج من الصفحة: ${xs(a).map(x => `${ft(x.t)} (${x.d}ث)`).join("، ")}</p>` : ""}${a.ip ? `<p class="muted small" dir="ltr">IP: ${esc(a.ip)}</p>` : ""}${same(a).length ? `<p class="err small">نفس الـ IP مع: ${same(a).map(esc).join("، ")}</p>` : ""}</div>${qs.map((q, i) => `<div class="card" style="margin-top:14px"><b>سؤال ${i + 1}</b> <small class="muted">(${q.points} درجة)</small><p class="qt">${esc(q.text)}</p><p><b>إجابة الطالب:</b> <span style="white-space:pre-wrap">${show(q)}</span></p>${q.type !== "essay" ? `<p class="${auto(a, q) ? "muted" : "err"}">${auto(a, q) ? "صح ✓" : "غلط"} · الإجابة الصح: ${q.type === "mcq" ? esc(q.options[key[q.id]]) : key[q.id] ? "صح" : "خطأ"}</p>` : ""}${rvw(q) ? `<p class="err">طلب مراجعة: ${esc(rvw(q).text)}</p>` : ""}${q.type === "essay" || rvw(q) ? `<label class="lb">${q.type === "essay" ? "الدرجة" : "تعديل الدرجة"}</label><input class="plain" type="number" min="0" max="${q.points}" step="0.5" data-q="${q.id}" data-m="${q.points}" value="${(a.grades || {})[q.id] ?? ""}">` : ""}</div>`).join("")}<div class="card" style="margin-top:14px"><button id="sv" class="btn p full" type="button">حفظ الدرجات</button><p id="msg" class="err"></p></div>`;
+    el.innerHTML = `<div class="card"><button id="bk" class="lnk" type="button">${ic("back", 18)} رجوع</button><h2 class="h" style="margin-top:10px">${esc(names[a.studentUid] || "طالب")} · ${score(a)} / ${total}</h2>${(a.exits || []).length ? `<p class="muted small">خروج من الصفحة: ${(a.exits || []).map(x => `${ft(x.t)} (${x.d}ث${x.p ? " · رفع صورة" : ""})`).join("، ")}</p>` : ""}${a.ip ? `<p class="muted small" dir="ltr">IP: ${esc(a.ip)}</p>` : ""}${same(a).length ? `<p class="err small">نفس الـ IP مع: ${same(a).map(esc).join("، ")}</p>` : ""}</div>${qs.map((q, i) => `<div class="card" style="margin-top:14px"><b>سؤال ${i + 1}</b> <small class="muted">(${q.points} درجة)</small><p class="qt">${esc(q.text)}</p>${urlImgs(q.imgs, 120)}<p><b>إجابة الطالب:</b> <span style="white-space:pre-wrap">${show(q)}</span></p>${q.type === "essay" ? urlImgs((a.answers || {})[q.id + "_i"]) : ""}${q.type !== "essay" ? `<p class="${auto(a, q) ? "muted" : "err"}">${auto(a, q) ? "صح ✓" : "غلط"} · الإجابة الصح: ${q.type === "mcq" ? esc(q.options[key[q.id]]) : key[q.id] ? "صح" : "خطأ"}</p>` : ""}${rvw(q) ? `<p class="err">طلب مراجعة: ${esc(rvw(q).text)}</p>` : ""}${q.type === "essay" || rvw(q) ? `<label class="lb">${q.type === "essay" ? "الدرجة" : "تعديل الدرجة"}</label><input class="plain" type="number" min="0" max="${q.points}" step="0.5" data-q="${q.id}" data-m="${q.points}" value="${(a.grades || {})[q.id] ?? ""}">` : ""}</div>`).join("")}<div class="card" style="margin-top:14px"><button id="sv" class="btn p full" type="button">حفظ الدرجات</button><p id="msg" class="err"></p></div>`;
     $("#bk", el).onclick = home;
     $("#sv", el).onclick = () => run(async () => {
       const g = {...(a.grades || {})};

@@ -2,10 +2,11 @@ import {db} from "./firebase.js";
 import {collection, query, where, getDocs, doc, getDoc, setDoc, updateDoc, deleteField, serverTimestamp} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {$, esc, toast, ic} from "./ui.js";
 import {examResults} from "./results.js";
+import {pickUpload, upMsg, pick, isCl, urlImgs} from "./media.js";
 
 const toLocal = ms => ms ? new Date(ms - new Date(ms).getTimezoneOffset() * 60000).toISOString().slice(0, 16) : "";
 const TN = {mcq: "اختيار من متعدد", tf: "صح / خطأ", essay: "مقالي"};
-const blank = () => ({id: crypto.randomUUID().slice(0, 8), type: "mcq", text: "", options: ["", "", "", ""], points: 1, ans: null});
+const blank = () => ({id: crypto.randomUUID().slice(0, 8), type: "mcq", text: "", options: ["", "", "", ""], points: 1, ans: null, imgs: []});
 
 export async function examBuilder(el, uid, lec, part, back){
   el.innerHTML = '<p class="muted center">جاري التحميل…</p>';
@@ -21,7 +22,7 @@ export async function examBuilder(el, uid, lec, part, back){
   } catch (e) {}
   let locked = 0;
   try { locked = (await getDocs(query(collection(db, "attempts"), where("teacherUid", "==", uid), where("examId", "==", part.id)))).size; } catch (e) {}
-  const sig = () => JSON.stringify(ex.questions.map(q => [q.id, q.type, q.text, q.type === "mcq" ? q.options.map(o => o.trim()) : []]));
+  const sig = () => JSON.stringify(ex.questions.map(q => [q.id, q.type, q.text, q.type === "mcq" ? q.options.map(o => o.trim()) : [], q.imgs || []]));
   const base = sig();
   const total = () => ex.questions.reduce((s, q) => s + (+q.points || 0), 0);
   const upd = () => { const t = $("#tot", el); if (t) t.textContent = `${ex.questions.length} سؤال · الدرجة الكلية ${total()}`; };
@@ -35,7 +36,7 @@ export async function examBuilder(el, uid, lec, part, back){
 <p class="muted small" id="tot"></p></div>
 ${ex.questions.map((q, i) => `<div class="card" style="margin-top:14px"><div class="lrow"><b class="lt">سؤال ${i + 1}</b><button class="ab" type="button" data-del="${i}" aria-label="مسح" ${L}>${ic("trash", 18)}</button></div>
 <select class="plain" data-f="type" data-i="${i}" ${L}>${Object.entries(TN).map(([k, t]) => `<option value="${k}" ${q.type === k ? "selected" : ""}>${t}</option>`).join("")}</select>
-<textarea class="plain" rows="3" data-f="text" data-i="${i}" placeholder="نص السؤال" style="margin-top:8px" ${L}>${esc(q.text)}</textarea>
+<textarea class="plain" rows="3" data-f="text" data-i="${i}" placeholder="نص السؤال" style="margin-top:8px" ${L}>${esc(q.text)}</textarea><div>${(q.imgs || []).filter(isCl).map((u, k) => `<span class="th"><img class="im" src="${esc(u)}" alt="صورة السؤال" style="width:96px;margin:4px">${locked ? "" : `<button class="ab" type="button" data-qr="${i}" data-k="${k}" aria-label="مسح">${ic("trash", 16)}</button>`}</span>`).join("")}</div>${(q.imgs || []).length < 2 ? `<button class="btn s sm" type="button" data-qi="${i}" ${L} style="margin-top:8px">+ صورة للسؤال (قص وتدوير)</button>` : ""}
 ${q.type === "mcq" ? q.options.map((o, k) => `<div class="optrow"><input type="radio" name="r${i}" data-f="ans" data-i="${i}" data-k="${k}" ${q.ans === k ? "checked" : ""} aria-label="الإجابة الصح"><input class="plain" data-f="opt" data-i="${i}" data-k="${k}" value="${esc(o)}" placeholder="اختيار ${k + 1}" ${L}></div>`).join("") + '<p class="muted small">علّم على الإجابة الصح.</p>' : q.type === "tf" ? [["1", "صح"], ["0", "خطأ"]].map(([v, t]) => `<div class="optrow"><input type="radio" name="r${i}" data-f="ans" data-i="${i}" data-v="${v}" ${q.ans === (v === "1") && q.ans !== null ? "checked" : ""}><span>${t}</span></div>`).join("") : '<p class="muted small">الطالب يكتب إجابته، وإنت تصححها يدوي.</p>'}
 <label class="lb">الدرجة</label><input class="plain" type="number" min="0" step="0.5" data-f="points" data-i="${i}" value="${q.points}"></div>`).join("")}
 <div class="card" style="margin-top:14px"><button id="aq" class="btn s full" type="button" ${L}>${ic("plus", 18)}<span>إضافة سؤال</span></button><div class="acts"><button id="sd" class="btn s" type="button" style="flex:1">حفظ كمسودة</button><button id="sp" class="btn p" type="button" style="flex:1">${ex.published ? "حفظ التعديل" : "نشر"}</button></div>${ex.published ? '<button id="rs" class="btn s full" type="button">النتائج والتصحيح</button><button id="un" class="btn s full" type="button">إلغاء النشر</button>' : ""}<p id="msg" class="err" role="alert"></p></div>`;
@@ -43,6 +44,13 @@ ${q.type === "mcq" ? q.options.map((o, k) => `<div class="optrow"><input type="r
     $("#bk", el).onclick = back;
     $("#aq", el).onclick = () => { meta(); ex.questions.push(blank()); draw(); };
     el.querySelectorAll("[data-del]").forEach(b => b.onclick = () => { if (confirm("مسح السؤال؟")) { meta(); ex.questions.splice(+b.dataset.del, 1); draw(); } });
+    el.querySelectorAll("[data-qi]").forEach(b => b.onclick = async () => {
+      meta(); const q = ex.questions[+b.dataset.qi];
+      try { const r = await pickUpload({kinds: ["image"], max: 2 - (q.imgs || []).length, edit: true}); q.imgs = [...(q.imgs || []), ...r.map(x => x.u)]; }
+      catch (er) { toast(upMsg(er)); }
+      draw();
+    });
+    el.querySelectorAll("[data-qr]").forEach(b => b.onclick = () => { meta(); ex.questions[+b.dataset.qr].imgs.splice(+b.dataset.k, 1); draw(); });
     $("#sd", el).onclick = () => save(false);
     $("#sp", el).onclick = () => save(true);
     const un = $("#un", el); if (un) un.onclick = () => save(false);
@@ -74,7 +82,7 @@ ${q.type === "mcq" ? q.options.map((o, k) => `<div class="optrow"><input type="r
       if (ex.duration < 1) return bad("حدّد مدة الحل");
       if (!ex.questions.length) return bad("أضف سؤال واحد على الأقل");
       for (const [i, q] of ex.questions.entries()) {
-        if (!q.text.trim()) return bad(`اكتب نص السؤال ${i + 1}`);
+        if (!q.text.trim() && !(q.imgs || []).length) return bad(`اكتب نص السؤال ${i + 1} أو أضف صورة`);
         if (q.type === "mcq" && (q.options.filter(o => o.trim()).length < 2 || q.options.some((o, k) => k === q.ans && !o.trim()))) return bad(`السؤال ${i + 1}: اكتب اختيارين على الأقل وعلّم الإجابة الصح`);
         if (q.type !== "essay" && q.ans === null) return bad(`السؤال ${i + 1}: علّم الإجابة الصح`);
         if (!(q.points > 0)) return bad(`السؤال ${i + 1}: اكتب الدرجة`);
@@ -82,7 +90,7 @@ ${q.type === "mcq" ? q.options.map((o, k) => `<div class="optrow"><input type="r
     }
     msg.textContent = "";
     try {
-      const qs = ex.questions.map(({ans, ...r}) => ({...r, options: r.type === "mcq" ? r.options.map(o => o.trim()) : []}));
+      const qs = ex.questions.map(({ans, ...r}) => ({...r, imgs: (r.imgs || []).slice(0, 2), options: r.type === "mcq" ? r.options.map(o => o.trim()) : []}));
       await setDoc(doc(db, "exams", part.id), {teacherUid: uid, lectureId: lec.id, partId: part.id, title: ex.title, start: ex.start, end: ex.end, duration: ex.duration, questions: qs, published: pub, updatedAt: serverTimestamp()}, {merge: true});
       const a = {}; ex.questions.forEach(q => { if (q.type !== "essay") a[q.id] = q.ans; });
       await setDoc(doc(db, "exams", part.id, "key", "main"), {answers: a});
@@ -106,13 +114,14 @@ export async function examSolve(el, uid, ex, att, back){
   if (att.submitted) return toast("تم تسليم الامتحان");
   const dl = Math.min(att.startedAt.toMillis() + ex.duration * 60000, ex.end), qs = ex.questions;
   const ans = {...att.answers};
-  let cur = 0, done = false, tm, dbn, hidAt = 0;
+  let cur = 0, done = false, tm, dbn, hidAt = 0, hidP = false;
   const exits = [...(att.exits || [])];
-  const vis = () => { if (done) return; if (document.hidden) hidAt = Date.now(); else if (hidAt) { exits.push({t: hidAt, d: Math.round((Date.now() - hidAt) / 1000)}); hidAt = 0; updateDoc(doc(db, "attempts", id), {exits}).catch(() => {}); } };
+  const vis = () => { if (done) return; if (document.hidden) { hidAt = Date.now(); hidP = pick.active; } else if (hidAt) { exits.push({t: hidAt, d: Math.round((Date.now() - hidAt) / 1000), ...(hidP ? {p: 1} : {})}); hidAt = 0; updateDoc(doc(db, "attempts", id), {exits}).catch(() => {}); } };
   document.addEventListener("visibilitychange", vis);
   el.oncopy = el.oncut = el.onpaste = el.oncontextmenu = e => e.preventDefault();
-  const has = q => ans[q.id] != null && ans[q.id] !== "";
-  const put = (q, v) => { if (v === null || v === "") { delete ans[q.id]; v = deleteField(); } else ans[q.id] = v; updateDoc(doc(db, "attempts", id), {["answers." + q.id]: v}).catch(() => {}); };
+  const has = q => (ans[q.id] != null && ans[q.id] !== "") || (ans[q.id + "_i"] || []).length > 0;
+  const putk = (k, v) => { if (v === null || v === "") { delete ans[k]; v = deleteField(); } else ans[k] = v; updateDoc(doc(db, "attempts", id), {["answers." + k]: v}).catch(() => {}); };
+  const put = (q, v) => putk(q.id, v);
   const finish = () => {
     if (done) return; done = true; clearInterval(tm); document.removeEventListener("visibilitychange", vis);
     el.oncopy = el.oncut = el.onpaste = el.oncontextmenu = null;
@@ -128,14 +137,23 @@ export async function examSolve(el, uid, ex, att, back){
     const q = qs[cur];
     const body = q.type === "mcq" ? q.options.map((o, k) => o ? `<button type="button" class="opt${ans[q.id] === k ? " on" : ""}" data-o="${k}">${esc(o)}</button>` : "").join("")
       : q.type === "tf" ? [["1", "صح"], ["0", "خطأ"]].map(([v, t]) => `<button type="button" class="opt${ans[q.id] === (v === "1") ? " on" : ""}" data-o="${v}">${t}</button>`).join("")
-      : `<textarea id="ea" class="plain" rows="7" placeholder="اكتب إجابتك هنا" style="margin-top:10px">${esc(ans[q.id] || "")}</textarea>`;
-    el.innerHTML = `<div class="card"><div class="exbar"><b id="tm" dir="ltr"></b><span class="muted">سؤال ${cur + 1} من ${qs.length}</span></div><div class="nocopy"><p class="qt">${esc(q.text)}</p>${body}</div><div class="acts">${cur > 0 ? '<button id="pv" class="btn s" type="button" style="flex:1">السابق</button>' : ""}${cur < qs.length - 1 ? '<button id="nx" class="btn p" type="button" style="flex:1">التالي</button>' : '<button id="sb" class="btn p" type="button" style="flex:1">تسليم</button>'}</div><div class="grid">${qs.map((x, i) => `<button type="button" class="gb${has(x) ? " ok" : ""}${i === cur ? " cur" : ""}" data-g="${i}" aria-label="سؤال ${i + 1}">${i + 1}</button>`).join("")}</div></div>`;
+      : `<textarea id="ea" class="plain" rows="7" placeholder="اكتب إجابتك هنا" style="margin-top:10px">${esc(ans[q.id] || "")}</textarea><div>${(ans[q.id + "_i"] || []).filter(isCl).map((u, k) => `<span class="th"><img class="im" src="${esc(u)}" alt="" style="width:96px;margin:4px"><button class="ab" type="button" data-ri="${k}" aria-label="مسح">${ic("trash", 16)}</button></span>`).join("")}</div>${(ans[q.id + "_i"] || []).length < 3 ? '<button id="ei" class="btn s sm" type="button" style="margin-top:8px">+ صورة إجابة</button>' : ""}`;
+    el.innerHTML = `<div class="card"><div class="exbar"><b id="tm" dir="ltr"></b><span class="muted">سؤال ${cur + 1} من ${qs.length}</span></div><div class="nocopy"><p class="qt">${esc(q.text)}</p>${urlImgs(q.imgs)}${body}</div><div class="acts">${cur > 0 ? '<button id="pv" class="btn s" type="button" style="flex:1">السابق</button>' : ""}${cur < qs.length - 1 ? '<button id="nx" class="btn p" type="button" style="flex:1">التالي</button>' : '<button id="sb" class="btn p" type="button" style="flex:1">تسليم</button>'}</div><div class="grid">${qs.map((x, i) => `<button type="button" class="gb${has(x) ? " ok" : ""}${i === cur ? " cur" : ""}" data-g="${i}" aria-label="سؤال ${i + 1}">${i + 1}</button>`).join("")}</div></div>`;
     tick();
     el.querySelectorAll("[data-o]").forEach(b => b.onclick = () => {
       const v = q.type === "tf" ? b.dataset.o === "1" : +b.dataset.o;
       put(q, ans[q.id] === v ? null : v); draw();
     });
     const ea = $("#ea", el); if (ea) ea.oninput = () => { clearTimeout(dbn); dbn = setTimeout(() => { put(q, ea.value.trim() ? ea.value : null); }, 500); ea.onblur = () => put(q, ea.value.trim() ? ea.value : null); };
+    const fl = () => { const t = $("#ea", el); if (t) put(q, t.value.trim() ? t.value : null); };
+    const ei = $("#ei", el);
+    if (ei) ei.onclick = async () => {
+      fl(); const k = q.id + "_i", mine = ans[k] || [];
+      try { const r = await pickUpload({kinds: ["image"], max: 3 - mine.length, edit: true}); if (done) return; if (r.length) putk(k, [...mine, ...r.map(x => x.u)]); }
+      catch (er) { toast(upMsg(er)); }
+      if (!done) draw();
+    };
+    el.querySelectorAll("[data-ri]").forEach(b => b.onclick = () => { fl(); const k = q.id + "_i", a = [...(ans[k] || [])]; a.splice(+b.dataset.ri, 1); putk(k, a.length ? a : null); draw(); });
     el.querySelectorAll("[data-g]").forEach(b => b.onclick = () => { cur = +b.dataset.g; draw(); });
     const pv = $("#pv", el), nx = $("#nx", el), sb = $("#sb", el);
     if (pv) pv.onclick = () => { cur--; draw(); };

@@ -3,11 +3,14 @@ import {collection, query, where, getDocs, doc, addDoc, updateDoc, deleteDoc, wr
 import {$, esc, toast, ic} from "./ui.js";
 import {examBuilder} from "./exam.js";
 import {hwBuilder} from "./homework.js";
+import {pickUpload, upMsg} from "./media.js";
 
 const TYPES = {explain: ["شرح", "vid"], homework: ["واجب", "doc"], exam: ["امتحان", "exam"]};
 const CH = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const genCode = () => Array.from(crypto.getRandomValues(new Uint8Array(6)), n => CH[n % 32]).join("");
 const ab = (act, icon, label, id = "", extra = "") => `<button class="ab" type="button" data-act="${act}" data-id="${id}" ${extra} aria-label="${label}">${ic(icon, 18)}</button>`;
+
+const mc = p => { const n = (p.media || []).length + (!p.media && p.url ? 1 : 0); return n ? n + " ملف" : "لسه فاضي"; };
 
 export async function renderTeacher(el, uid, d){
   let lects = [], stu = [], cur = null, code = d.code;
@@ -57,11 +60,11 @@ export async function renderTeacher(el, uid, d){
   function lecture(l){
     cur = l;
     el.innerHTML = `<div class="card"><button id="bk" class="lnk" type="button">${ic("back", 18)} رجوع للمحاضرات</button><div class="addrow" style="margin-top:12px"><input id="lt" value="${esc(l.title)}" aria-label="اسم المحاضرة"><button id="sv" class="btn s sm" type="button">حفظ الاسم</button></div><label class="lb">طريقة فتح الأجزاء للطالب</label><div class="roles">${[["ordered", "بالترتيب"], ["open", "مفتوحة"]].map(([k, t]) => `<button type="button" data-m="${k}" class="${l.mode === k ? "on" : ""}"><span>${t}</span></button>`).join("")}</div><p class="muted small">${l.mode === "open" ? "كل الأجزاء ظاهرة للطالب من الأول." : "الطالب يخلّص الجزء اللي قبله عشان يفتح اللي بعده."}</p>${l.mode === "ordered" ? '<button id="all" class="btn s sm" type="button">افتح الكل للطلاب</button>' : ""}</div>
-<div class="card" style="margin-top:14px"><h2 class="h">الأجزاء (${l.parts.length})</h2><div class="addrow"><input id="pt" placeholder="عنوان الجزء (اختياري)" aria-label="عنوان الجزء"></div><div class="roles three">${Object.entries(TYPES).map(([k, [t, i]]) => `<button type="button" data-add="${k}">${ic(i, 22)}<span>+ ${t}</span></button>`).join("")}</div><div id="ps">${l.parts.length ? l.parts.map((p, i) => `<div class="item lrow"><span class="ic">${ic(TYPES[p.type][1])}</span><div class="lt"><b>${esc(p.title)}</b><small>${TYPES[p.type][0]} · المحتوى قريباً</small></div>${p.type === "exam" ? `<button class="btn s sm" type="button" data-ex="${i}">إعداد</button>` : p.type === "homework" ? `<button class="btn s sm" type="button" data-hwb="${i}">إعداد</button>` : `<button class="btn s sm" type="button" data-ln="${i}">رابط</button>`}${ab("pu", "up", "فوق", i)}${ab("pd", "down", "تحت", i)}${ab("px", "trash", "مسح", i)}</div>`).join("") : '<p class="muted center">أضف أجزاء المحاضرة من الأزرار فوق.</p>'}</div></div>`;
+<div class="card" style="margin-top:14px"><h2 class="h">الأجزاء (${l.parts.length})</h2><div class="addrow"><input id="pt" placeholder="عنوان الجزء (اختياري)" aria-label="عنوان الجزء"></div><div class="roles three">${Object.entries(TYPES).map(([k, [t, i]]) => `<button type="button" data-add="${k}">${ic(i, 22)}<span>+ ${t}</span></button>`).join("")}</div><div id="ps">${l.parts.length ? l.parts.map((p, i) => `<div class="item lrow"><span class="ic">${ic(TYPES[p.type][1])}</span><div class="lt"><b>${esc(p.title)}</b><small>${TYPES[p.type][0]}${p.type === "explain" ? " · " + mc(p) : ""}</small></div>${p.type === "exam" ? `<button class="btn s sm" type="button" data-ex="${i}">إعداد</button>` : p.type === "homework" ? `<button class="btn s sm" type="button" data-hwb="${i}">إعداد</button>` : `<button class="btn s sm" type="button" data-cb="${i}">المحتوى</button>`}${ab("pu", "up", "فوق", i)}${ab("pd", "down", "تحت", i)}${ab("px", "trash", "مسح", i)}</div>`).join("") : '<p class="muted center">أضف أجزاء المحاضرة من الأزرار فوق.</p>'}</div></div>`;
     $("#bk", el).onclick = home;
     el.querySelectorAll("[data-ex]").forEach(b => b.onclick = () => examBuilder(el, uid, l, l.parts[+b.dataset.ex], () => lecture(l)));
     el.querySelectorAll("[data-hwb]").forEach(b => b.onclick = () => hwBuilder(el, uid, l, l.parts[+b.dataset.hwb], () => lecture(l)));
-    el.querySelectorAll("[data-ln]").forEach(b => b.onclick = () => run(async () => { const i = +b.dataset.ln, u = prompt("الصق رابط الفيديو أو الملف (يبدأ بـ https)", l.parts[i].url || ""); if (u === null) return; if (u && !/^https?:\/\//.test(u.trim())) return toast("الرابط لازم يبدأ بـ https"); const ps = [...l.parts]; ps[i] = {...ps[i], url: u.trim()}; await save(l, {parts: ps}); lecture(l); }));
+    el.querySelectorAll("[data-cb]").forEach(b => b.onclick = () => content(l, +b.dataset.cb));
     $("#sv", el).onclick = () => run(async () => { const t = $("#lt", el).value.trim(); if (!t) return toast("اكتب الاسم"); await save(l, {title: t}); }, "تم الحفظ");
     el.querySelectorAll("[data-m]").forEach(b => b.onclick = () => run(async () => { await save(l, {mode: b.dataset.m}); lecture(l); }));
     const all = $("#all", el); if (all) all.onclick = () => run(async () => { await save(l, {mode: "open"}); lecture(l); }, "الأجزاء مفتوحة للطلاب");
@@ -75,6 +78,37 @@ export async function renderTeacher(el, uid, d){
       else if (!swap(ps, i, a === "pu" ? i - 1 : i + 1)) return;
       await save(l, {parts: ps}); lecture(l);
     }));
+  }
+
+  function content(l, i){
+    const p = l.parts[i];
+    let media = p.media ? [...p.media] : (p.url ? [{u: p.url, t: "link", n: "رابط"}] : []);
+    const persist = async () => { const ps = [...l.parts]; const {url, ...rest} = ps[i]; ps[i] = {...rest, media}; await save(l, {parts: ps}); };
+    const draw = () => {
+      el.innerHTML = `<div class="card"><button id="bk" class="lnk" type="button">${ic("back", 18)} رجوع للمحاضرة</button><h2 class="h" style="margin-top:10px">${esc(p.title)}</h2>
+<div id="ml">${media.length ? media.map((m, k) => `<div class="item lrow"><span class="ic">${ic(m.t === "video" ? "vid" : "doc")}</span><div class="lt"><b>${esc(m.n || "ملف")}</b><small>${m.t === "video" ? "فيديو" : m.t === "pdf" ? "PDF" : "رابط"}</small></div><a class="btn s sm" style="text-decoration:none" href="${esc(m.u)}" target="_blank" rel="noopener">فتح</a><button class="ab" type="button" data-d="${k}" aria-label="مسح">${ic("trash", 18)}</button></div>`).join("") : '<p class="muted center">لسه مفيش محتوى. ارفع فيديو أو PDF.</p>'}</div>
+<div class="roles three" style="margin-top:12px"><button type="button" data-n="video">${ic("vid", 22)}<span>+ فيديو</span></button><button type="button" data-n="pdf">${ic("doc", 22)}<span>+ PDF</span></button><button type="button" data-n="link"><span>+ رابط</span></button></div>
+<p class="muted small">الفيديو لحد 100 ميجا والـ PDF لحد 10 ميجا. الطالب بيشوف الفيديو جوا المنصة، وبيتحسب إنه خلّصه لما يشاهد 90% منه فعلياً.</p></div>`;
+      $("#bk", el).onclick = () => lecture(l);
+      el.querySelectorAll("[data-d]").forEach(b => b.onclick = async () => {
+        if (!confirm("شيل الملف ده من الجزء؟")) return;
+        const old = media; media = media.filter((_, k) => k !== +b.dataset.d);
+        try { await persist(); } catch (e) { media = old; toast("حصل خطأ، حاول تاني"); }
+        draw();
+      });
+      el.querySelectorAll("[data-n]").forEach(b => b.onclick = async () => {
+        const old = media;
+        try {
+          const k = b.dataset.n; let r;
+          if (k === "link") { const u = prompt("الصق الرابط (يبدأ بـ https)"); if (!u) return; if (!/^https:\/\//.test(u.trim())) return toast("الرابط لازم يبدأ بـ https"); r = [{u: u.trim(), t: "link", n: "رابط"}]; }
+          else r = await pickUpload({kinds: [k], max: 1});
+          if (!r.length) return;
+          media = [...media, ...r]; await persist(); toast("تمت الإضافة");
+        } catch (e) { media = old; toast(upMsg(e)); }
+        draw();
+      });
+    };
+    draw();
   }
 
   el.innerHTML = '<p class="muted center">جاري التحميل…</p>';
