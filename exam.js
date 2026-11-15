@@ -1,6 +1,7 @@
 import {db} from "./firebase.js";
 import {doc, getDoc, setDoc, updateDoc, deleteField, serverTimestamp} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {$, esc, toast, ic} from "./ui.js";
+import {examResults} from "./results.js";
 
 const toLocal = ms => ms ? new Date(ms - new Date(ms).getTimezoneOffset() * 60000).toISOString().slice(0, 16) : "";
 const TN = {mcq: "اختيار من متعدد", tf: "صح / خطأ", essay: "مقالي"};
@@ -32,7 +33,7 @@ ${ex.questions.map((q, i) => `<div class="card" style="margin-top:14px"><div cla
 <textarea class="plain" rows="3" data-f="text" data-i="${i}" placeholder="نص السؤال" style="margin-top:8px">${esc(q.text)}</textarea>
 ${q.type === "mcq" ? q.options.map((o, k) => `<div class="optrow"><input type="radio" name="r${i}" data-f="ans" data-i="${i}" data-k="${k}" ${q.ans === k ? "checked" : ""} aria-label="الإجابة الصح"><input class="plain" data-f="opt" data-i="${i}" data-k="${k}" value="${esc(o)}" placeholder="اختيار ${k + 1}"></div>`).join("") + '<p class="muted small">علّم على الإجابة الصح.</p>' : q.type === "tf" ? [["1", "صح"], ["0", "خطأ"]].map(([v, t]) => `<div class="optrow"><input type="radio" name="r${i}" data-f="ans" data-i="${i}" data-v="${v}" ${q.ans === (v === "1") && q.ans !== null ? "checked" : ""}><span>${t}</span></div>`).join("") : '<p class="muted small">الطالب يكتب إجابته، وإنت تصححها يدوي.</p>'}
 <label class="lb">الدرجة</label><input class="plain" type="number" min="0" step="0.5" data-f="points" data-i="${i}" value="${q.points}"></div>`).join("")}
-<div class="card" style="margin-top:14px"><button id="aq" class="btn s full" type="button">${ic("plus", 18)}<span>إضافة سؤال</span></button><div class="acts"><button id="sd" class="btn s" type="button" style="flex:1">حفظ كمسودة</button><button id="sp" class="btn p" type="button" style="flex:1">${ex.published ? "حفظ التعديل" : "نشر"}</button></div>${ex.published ? '<button id="un" class="btn s full" type="button">إلغاء النشر</button>' : ""}<p id="msg" class="err" role="alert"></p></div>`;
+<div class="card" style="margin-top:14px"><button id="aq" class="btn s full" type="button">${ic("plus", 18)}<span>إضافة سؤال</span></button><div class="acts"><button id="sd" class="btn s" type="button" style="flex:1">حفظ كمسودة</button><button id="sp" class="btn p" type="button" style="flex:1">${ex.published ? "حفظ التعديل" : "نشر"}</button></div>${ex.published ? '<button id="rs" class="btn s full" type="button">النتائج والتصحيح</button><button id="un" class="btn s full" type="button">إلغاء النشر</button>' : ""}<p id="msg" class="err" role="alert"></p></div>`;
     upd();
     $("#bk", el).onclick = back;
     $("#aq", el).onclick = () => { meta(); ex.questions.push(blank()); draw(); };
@@ -40,6 +41,7 @@ ${q.type === "mcq" ? q.options.map((o, k) => `<div class="optrow"><input type="r
     $("#sd", el).onclick = () => save(false);
     $("#sp", el).onclick = () => save(true);
     const un = $("#un", el); if (un) un.onclick = () => save(false);
+    const rs = $("#rs", el); if (rs) rs.onclick = () => examResults(el, uid, {id: part.id, title: ex.title, start: ex.start, end: ex.end, duration: ex.duration, questions: ex.questions.map(({ans, ...r}) => r)}, () => examBuilder(el, uid, lec, part, back));
   };
   const meta = () => {
     ex.title = $("#et", el).value.trim();

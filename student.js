@@ -61,6 +61,7 @@ export async function renderStudent(el, uid, d){
     const exBtn = p => {
       const e = exs[p.id]; if (!e) return "";
       const a = atts[p.id], n = Date.now();
+      if (a && a.released) return `<b>${a.result.score} من ${a.result.total}</b>`;
       if (a && a.submitted) return '<span class="muted small">تم التسليم</span>';
       if (!a && n < e.start) return `<span class="muted small">يبدأ ${fm(e.start)}</span>`;
       if (n > e.end) return '<span class="muted small">انتهى</span>';

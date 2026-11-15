@@ -81,3 +81,6 @@ input:focus-visible,select:focus-visible,button:focus-visible{outline:3px solid 
 .gb.cur{outline:2px solid var(--primary)}
 .nocopy{user-select:none;-webkit-user-select:none}
 .nocopy textarea{user-select:text;-webkit-user-select:text}
+.tbl{width:100%;border-collapse:collapse;font-size:14px}
+.tbl th{color:var(--muted);font-weight:600}
+.tbl td,.tbl th{padding:8px 6px;border-top:1px solid var(--line);text-align:start;white-space:nowrap}
