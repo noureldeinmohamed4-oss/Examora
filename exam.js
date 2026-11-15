@@ -1,5 +1,5 @@
 import {db} from "./firebase.js";
-import {doc, getDoc, setDoc, updateDoc, deleteField, serverTimestamp} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import {collection, query, where, getDocs, doc, getDoc, setDoc, updateDoc, deleteField, serverTimestamp} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {$, esc, toast, ic} from "./ui.js";
 import {examResults} from "./results.js";
 
@@ -19,21 +19,26 @@ export async function examBuilder(el, uid, lec, part, back){
       ex.questions = ex.questions.map(q => ({...q, ans: a[q.id] ?? null}));
     }
   } catch (e) {}
+  let locked = 0;
+  try { locked = (await getDocs(query(collection(db, "attempts"), where("teacherUid", "==", uid), where("examId", "==", part.id)))).size; } catch (e) {}
+  const sig = () => JSON.stringify(ex.questions.map(q => [q.id, q.type, q.text, q.type === "mcq" ? q.options.map(o => o.trim()) : []]));
+  const base = sig();
   const total = () => ex.questions.reduce((s, q) => s + (+q.points || 0), 0);
   const upd = () => { const t = $("#tot", el); if (t) t.textContent = `${ex.questions.length} سؤال · الدرجة الكلية ${total()}`; };
   const draw = () => {
-    el.innerHTML = `<div class="card"><button id="bk" class="lnk" type="button">${ic("back", 18)} رجوع</button><h2 class="h" style="margin-top:10px">إعداد الامتحان ${ex.published ? "· منشور" : "· مسودة"}</h2>
+    const L = locked ? "disabled" : "";
+    el.innerHTML = `<div class="card"><button id="bk" class="lnk" type="button">${ic("back", 18)} رجوع</button><h2 class="h" style="margin-top:10px">إعداد الامتحان ${ex.published ? "· منشور" : "· مسودة"}</h2>${locked ? `<p class="err">${locked} طالب بدأوا الامتحان، فالأسئلة اتقفلت. تقدر تعدّل الإجابة الصح والدرجة بس.</p>` : ""}
 <label class="lb">عنوان الامتحان</label><input id="et" class="plain" value="${esc(ex.title)}">
 <label class="lb">يبدأ</label><input id="es" class="plain" type="datetime-local" value="${toLocal(ex.start)}">
 <label class="lb">ينتهي</label><input id="ee" class="plain" type="datetime-local" value="${toLocal(ex.end)}">
 <label class="lb">مدة الحل (بالدقايق)</label><input id="ed" class="plain" type="number" min="1" value="${ex.duration}">
 <p class="muted small" id="tot"></p></div>
-${ex.questions.map((q, i) => `<div class="card" style="margin-top:14px"><div class="lrow"><b class="lt">سؤال ${i + 1}</b><button class="ab" type="button" data-del="${i}" aria-label="مسح">${ic("trash", 18)}</button></div>
-<select class="plain" data-f="type" data-i="${i}">${Object.entries(TN).map(([k, t]) => `<option value="${k}" ${q.type === k ? "selected" : ""}>${t}</option>`).join("")}</select>
-<textarea class="plain" rows="3" data-f="text" data-i="${i}" placeholder="نص السؤال" style="margin-top:8px">${esc(q.text)}</textarea>
-${q.type === "mcq" ? q.options.map((o, k) => `<div class="optrow"><input type="radio" name="r${i}" data-f="ans" data-i="${i}" data-k="${k}" ${q.ans === k ? "checked" : ""} aria-label="الإجابة الصح"><input class="plain" data-f="opt" data-i="${i}" data-k="${k}" value="${esc(o)}" placeholder="اختيار ${k + 1}"></div>`).join("") + '<p class="muted small">علّم على الإجابة الصح.</p>' : q.type === "tf" ? [["1", "صح"], ["0", "خطأ"]].map(([v, t]) => `<div class="optrow"><input type="radio" name="r${i}" data-f="ans" data-i="${i}" data-v="${v}" ${q.ans === (v === "1") && q.ans !== null ? "checked" : ""}><span>${t}</span></div>`).join("") : '<p class="muted small">الطالب يكتب إجابته، وإنت تصححها يدوي.</p>'}
+${ex.questions.map((q, i) => `<div class="card" style="margin-top:14px"><div class="lrow"><b class="lt">سؤال ${i + 1}</b><button class="ab" type="button" data-del="${i}" aria-label="مسح" ${L}>${ic("trash", 18)}</button></div>
+<select class="plain" data-f="type" data-i="${i}" ${L}>${Object.entries(TN).map(([k, t]) => `<option value="${k}" ${q.type === k ? "selected" : ""}>${t}</option>`).join("")}</select>
+<textarea class="plain" rows="3" data-f="text" data-i="${i}" placeholder="نص السؤال" style="margin-top:8px" ${L}>${esc(q.text)}</textarea>
+${q.type === "mcq" ? q.options.map((o, k) => `<div class="optrow"><input type="radio" name="r${i}" data-f="ans" data-i="${i}" data-k="${k}" ${q.ans === k ? "checked" : ""} aria-label="الإجابة الصح"><input class="plain" data-f="opt" data-i="${i}" data-k="${k}" value="${esc(o)}" placeholder="اختيار ${k + 1}" ${L}></div>`).join("") + '<p class="muted small">علّم على الإجابة الصح.</p>' : q.type === "tf" ? [["1", "صح"], ["0", "خطأ"]].map(([v, t]) => `<div class="optrow"><input type="radio" name="r${i}" data-f="ans" data-i="${i}" data-v="${v}" ${q.ans === (v === "1") && q.ans !== null ? "checked" : ""}><span>${t}</span></div>`).join("") : '<p class="muted small">الطالب يكتب إجابته، وإنت تصححها يدوي.</p>'}
 <label class="lb">الدرجة</label><input class="plain" type="number" min="0" step="0.5" data-f="points" data-i="${i}" value="${q.points}"></div>`).join("")}
-<div class="card" style="margin-top:14px"><button id="aq" class="btn s full" type="button">${ic("plus", 18)}<span>إضافة سؤال</span></button><div class="acts"><button id="sd" class="btn s" type="button" style="flex:1">حفظ كمسودة</button><button id="sp" class="btn p" type="button" style="flex:1">${ex.published ? "حفظ التعديل" : "نشر"}</button></div>${ex.published ? '<button id="rs" class="btn s full" type="button">النتائج والتصحيح</button><button id="un" class="btn s full" type="button">إلغاء النشر</button>' : ""}<p id="msg" class="err" role="alert"></p></div>`;
+<div class="card" style="margin-top:14px"><button id="aq" class="btn s full" type="button" ${L}>${ic("plus", 18)}<span>إضافة سؤال</span></button><div class="acts"><button id="sd" class="btn s" type="button" style="flex:1">حفظ كمسودة</button><button id="sp" class="btn p" type="button" style="flex:1">${ex.published ? "حفظ التعديل" : "نشر"}</button></div>${ex.published ? '<button id="rs" class="btn s full" type="button">النتائج والتصحيح</button><button id="un" class="btn s full" type="button">إلغاء النشر</button>' : ""}<p id="msg" class="err" role="alert"></p></div>`;
     upd();
     $("#bk", el).onclick = back;
     $("#aq", el).onclick = () => { meta(); ex.questions.push(blank()); draw(); };
@@ -62,6 +67,7 @@ ${q.type === "mcq" ? q.options.map((o, k) => `<div class="optrow"><input type="r
   async function save(pub){
     meta();
     const msg = $("#msg", el), bad = m => { msg.textContent = m; };
+    if (locked && sig() !== base) return bad("الأسئلة مقفولة لأن فيه طلاب بدأوا الامتحان.");
     if (!ex.title) return bad("اكتب عنوان الامتحان");
     if (pub) {
       if (!ex.start || !ex.end || ex.end <= ex.start) return bad("حدّد وقت بداية ونهاية صحيحين");
@@ -77,7 +83,7 @@ ${q.type === "mcq" ? q.options.map((o, k) => `<div class="optrow"><input type="r
     msg.textContent = "";
     try {
       const qs = ex.questions.map(({ans, ...r}) => ({...r, options: r.type === "mcq" ? r.options.map(o => o.trim()) : []}));
-      await setDoc(doc(db, "exams", part.id), {teacherUid: uid, lectureId: lec.id, partId: part.id, title: ex.title, start: ex.start, end: ex.end, duration: ex.duration, questions: qs, published: pub, updatedAt: serverTimestamp()});
+      await setDoc(doc(db, "exams", part.id), {teacherUid: uid, lectureId: lec.id, partId: part.id, title: ex.title, start: ex.start, end: ex.end, duration: ex.duration, questions: qs, published: pub, updatedAt: serverTimestamp()}, {merge: true});
       const a = {}; ex.questions.forEach(q => { if (q.type !== "essay") a[q.id] = q.ans; });
       await setDoc(doc(db, "exams", part.id, "key", "main"), {answers: a});
       ex.published = pub; toast(pub ? "تم النشر" : "تم الحفظ"); draw();
@@ -92,7 +98,8 @@ export async function examSolve(el, uid, ex, att, back){
     if (!att) {
       const n = Date.now();
       if (n < ex.start || n > ex.end) return toast("الامتحان مش متاح دلوقتي");
-      await setDoc(doc(db, "attempts", id), {examId: ex.id, studentUid: uid, teacherUid: ex.teacherUid, startedAt: serverTimestamp(), answers: {}, submitted: false});
+      const ip = await Promise.race([fetch("/api/ip", {cache: "no-store"}).then(r => r.json()).then(j => String(j.ip || "").slice(0, 64)), new Promise(r => setTimeout(() => r(""), 3000))]).catch(() => "");
+      await setDoc(doc(db, "attempts", id), {examId: ex.id, studentUid: uid, teacherUid: ex.teacherUid, startedAt: serverTimestamp(), answers: {}, submitted: false, ip});
       att = (await getDoc(doc(db, "attempts", id))).data({serverTimestamps: "estimate"});
     }
   } catch (e) { return toast("تعذّر بدء الامتحان"); }
