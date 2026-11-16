@@ -9,15 +9,16 @@ const legacy = (imgs, rm) => (imgs || []).map((s, i) => okImg(s) ? `<span class=
 const legacyFull = imgs => (imgs || []).map((s, i) => okImg(s) ? `<img class="im" src="${esc(s)}" alt="صورة ${i + 1}">` : "").join("");
 const url = u => /^https?:\/\//.test(u || "") ? esc(u) : "";
 
-export async function hwBuilder(el, uid, lec, part, back){
+export async function hwBuilder(el, uid, lec, part, back, openId){
   el.innerHTML = '<p class="muted center">جاري التحميل…</p>';
-  let hw = {title: part.title, text: "", imgs: [], files: [], modelUrl: "", max: 10}, subs = [], names = {};
+  let hw = {title: part.title, text: "", imgs: [], files: [], modelUrl: "", max: 10}, subs = [], names = {}, subsErr = false;
   try { const s = await getDoc(doc(db, "homeworks", part.id)); if (s.exists()) hw = {...hw, ...s.data()}; } catch (e) {}
   hw.imgs = hw.imgs || []; hw.files = hw.files || [];
   try {
     (await getDocs(query(collection(db, "links"), where("teacherUid", "==", uid)))).docs.forEach(x => { names[x.data().studentUid] = x.data().studentName; });
     subs = (await getDocs(query(collection(db, "subs"), where("teacherUid", "==", uid), where("partId", "==", part.id)))).docs.map(x => ({id: x.id, ...x.data()}));
-  } catch (e) {}
+    subs.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+  } catch (e) { subsErr = true; }
   const count = () => hw.imgs.length + hw.files.length;
   const meta = () => { hw.title = $("#ht", el).value.trim(); hw.text = $("#hx", el).value; hw.modelUrl = $("#hm", el).value.trim(); hw.max = +$("#hk", el).value || 10; };
   const draw = () => {
@@ -28,7 +29,7 @@ export async function hwBuilder(el, uid, lec, part, back){
 <label class="lb">الدرجة الكاملة</label><input id="hk" class="plain" type="number" min="1" value="${hw.max}">
 <label class="lb">نموذج الإجابة (اختياري، بيظهر للطالب بعد ما يسلّم)</label><input id="hm" class="plain" placeholder="https://" value="${esc(hw.modelUrl)}"><button id="mu" class="btn s sm" type="button" style="margin-top:8px">أو ارفع ملف النموذج</button>
 <button id="sv" class="btn p full" type="button">حفظ الواجب</button><p id="msg" class="err" role="alert"></p></div>
-<div class="card" style="margin-top:14px"><h2 class="h">التسليمات (${subs.length})</h2>${subs.length ? subs.map(s => `<div class="item lrow"><div class="lt"><b>${esc(names[s.studentUid] || "طالب")}</b><small>${s.graded ? "اتصحح: " + s.grade : "لسه ما اتصححش"}</small></div><button class="btn s sm" type="button" data-s="${s.id}">فتح</button></div>`).join("") : '<p class="muted center">لسه ما حدش سلّم.</p>'}</div>`;
+<div class="card" style="margin-top:14px"><h2 class="h">التسليمات (${subs.length})</h2>${subsErr ? '<p class="err">تعذّر تحميل التسليمات. تأكد من الإنترنت وقواعد Firestore.</p>' : subs.length ? subs.map(s => `<div class="item lrow"><div class="lt"><b>${esc(names[s.studentUid] || "طالب")}</b><small>${s.graded ? "اتصحح: " + s.grade : "لسه ما اتصححش"}</small></div><button class="btn s sm" type="button" data-s="${s.id}">فتح</button></div>`).join("") : '<p class="muted center">لسه ما حدش سلّم.</p>'}</div>`;
     $("#bk", el).onclick = back;
     el.querySelectorAll("[data-rm]").forEach(b => b.onclick = () => { meta(); hw.imgs.splice(+b.dataset.rm, 1); draw(); });
     el.querySelectorAll("[data-rmf]").forEach(b => b.onclick = () => { meta(); hw.files.splice(+b.dataset.rmf, 1); draw(); });
@@ -53,15 +54,18 @@ export async function hwBuilder(el, uid, lec, part, back){
     };
     el.querySelectorAll("[data-s]").forEach(b => b.onclick = () => view(subs.find(x => x.id === b.dataset.s)));
   };
+  let direct = false;
+  const leaveView = () => (direct ? back() : draw());
   const view = s => {
     el.innerHTML = `<div class="card"><button id="bk" class="lnk" type="button">${ic("back", 18)} رجوع</button><h2 class="h" style="margin-top:10px">${esc(names[s.studentUid] || "طالب")}</h2>${legacyFull(s.imgs)}${filesFull(s.files)}<label class="lb">الدرجة (من ${hw.max})</label><input id="g" class="plain" type="number" min="0" max="${hw.max}" step="0.5" value="${s.grade ?? ""}"><label class="lb">ملاحظة (اختياري)</label><textarea id="n" class="plain" rows="2">${esc(s.note || "")}</textarea><button id="sg" class="btn p full" type="button">حفظ الدرجة</button><p id="msg" class="err"></p></div>`;
-    $("#bk", el).onclick = draw;
+    $("#bk", el).onclick = leaveView;
     $("#sg", el).onclick = async () => {
       const g = +$("#g", el).value; if ($("#g", el).value === "" || !(g >= 0 && g <= hw.max)) return $("#msg", el).textContent = "الدرجة لازم تكون من 0 لـ " + hw.max;
-      try { const p = {grade: g, note: $("#n", el).value.trim(), graded: true}; await updateDoc(doc(db, "subs", s.id), p); Object.assign(s, p); toast("تم الحفظ"); draw(); } catch (e) { $("#msg", el).textContent = "حصل خطأ، حاول تاني"; }
+      try { const p = {grade: g, note: $("#n", el).value.trim(), graded: true}; await updateDoc(doc(db, "subs", s.id), p); Object.assign(s, p); toast("تم الحفظ"); leaveView(); } catch (e) { $("#msg", el).textContent = "حصل خطأ، حاول تاني"; }
     };
   };
-  draw();
+  const first = openId && subs.find(x => x.id === openId);
+  if (first) { direct = true; view(first); } else draw();
 }
 
 export function hwStudent(el, uid, teacherUid, hw, sub, back){

@@ -26,6 +26,30 @@ function track(v, init, on){
   return {frac: () => isFinite(v.duration) && v.duration > 0 ? Math.min(1, cov() / v.duration) : 0, flat: () => r.flatMap(x => [Math.round(x[0] * 10) / 10, Math.round(x[1] * 10) / 10])};
 }
 
+const okMedia = m => !m ? false : m.t === "yt" ? /^[A-Za-z0-9_-]{11}$/.test(m.id || "") : m.t === "video" ? (isCl(m.u) || !!(m.x && /^https:\/\//.test(m.u || ""))) : m.t === "pdf" ? isCl(m.u) : m.t === "link" ? /^https?:\/\//.test(m.u || "") : false;
+let ytp = null;
+const ytReady = () => ytp || (ytp = new Promise((ok, no) => {
+  if (window.YT && window.YT.Player) return ok();
+  const sc = document.createElement("script"); sc.src = "https://www.youtube.com/iframe_api";
+  sc.onerror = () => { ytp = null; no(new Error("yt")); };
+  window.onYouTubeIframeAPIReady = ok;
+  document.head.appendChild(sc);
+  setTimeout(() => { if (!(window.YT && window.YT.Player)) { ytp = null; no(new Error("yt")); } }, 12000);
+}));
+function trackYT(p, init, on){
+  let r = merge(Array.from({length: Math.floor((init || []).length / 2)}, (_, i) => [init[2 * i], init[2 * i + 1]])), last = null;
+  const cov = () => r.reduce((s, x) => s + (x[1] - x[0]), 0);
+  const timer = setInterval(() => {
+    let st, t, rate = 1;
+    try { st = p.getPlayerState(); t = p.getCurrentTime(); rate = p.getPlaybackRate() || 1; } catch (e) { return; }
+    if (st === 1) {
+      if (last != null) { const d = t - last; if (d > 0 && d <= 0.5 * rate + 0.6) { r.push([last, t]); r = merge(r); } }
+      last = t; on(false);
+    } else if (last != null) { last = null; on(true); }
+  }, 500);
+  return {frac: () => { let d = 0; try { d = p.getDuration(); } catch (e) {} return d > 0 ? Math.min(1, cov() / d) : 0; }, flat: () => r.flatMap(x => [Math.round(x[0] * 10) / 10, Math.round(x[1] * 10) / 10]), stop: () => clearInterval(timer)};
+}
+
 export async function renderStudent(el, uid, d){
   let links = [];
   const run = async (fn, ok) => { try { await fn(); if (ok) toast(ok); } catch (e) { toast("حصل خطأ، حاول تاني"); } };
@@ -111,29 +135,37 @@ export async function renderStudent(el, uid, d){
     $("#bk", el).onclick = home;
     const back = () => teacher(l);
     const explain = p => {
-      const items = (p.media || (p.url ? [{u: p.url, t: "link", n: "رابط"}] : [])).filter(m => m.t === "link" ? /^https?:\/\//.test(m.u || "") : isCl(m.u));
+      const items = (p.media || (p.url ? [{u: p.url, t: "link", n: "رابط"}] : [])).filter(okMedia);
+      const vidN = items.filter(m => m.t === "video" || m.t === "yt").length;
       const trk = [], w = wat[p.id] || {};
-      let dirty = false, tm = null;
+      let dirty = false, tm = null, dead = false;
       const persist = fin => {
         if (!dirty && !fin) return Promise.resolve();
         dirty = false;
-        const watch = {}; trk.forEach(t => { watch[t.i] = t.tr.flat(); }); wat[p.id] = watch;
-        return setDoc(doc(db, "progress", p.id + "_" + uid), {partId: p.id, studentUid: uid, teacherUid: l.teacherUid, done: !!prog[p.id], watch}, {merge: true}).catch(() => { dirty = true; });
+        const watch = {}; trk.forEach(t => { watch[t.i] = t.tr.flat(); }); wat[p.id] = Object.assign(wat[p.id] || {}, watch);
+        const pct = trk.length ? Math.round(trk.reduce((a, t) => a + t.tr.frac(), 0) / trk.length * 100) : 0;
+        return setDoc(doc(db, "progress", p.id + "_" + uid), {partId: p.id, studentUid: uid, teacherUid: l.teacherUid, done: !!prog[p.id], pct: prog[p.id] ? Math.max(pct, 90) : pct, watch}, {merge: true}).catch(() => { dirty = true; });
       };
       const paint = flush => {
         trk.forEach(t => { const f = Math.round(t.tr.frac() * 100), b = $("#b" + t.i, el), x = $("#t" + t.i, el); if (b) b.style.width = f + "%"; if (x) x.textContent = "شاهدت " + f + "%"; });
         dirty = true;
-        if (trk.length && !prog[p.id] && trk.every(t => t.tr.frac() >= 0.9)) {
+        if (vidN && trk.length === vidN && !prog[p.id] && trk.every(t => t.tr.frac() >= 0.9)) {
           prog[p.id] = 1;
-          const s = $("#st", el); if (s) s.textContent = "✓ تم احتساب الجزء ده";
+          const st = $("#st", el); if (st) st.textContent = "✓ تم احتساب الجزء ده";
           persist(true).then(() => toast("تم احتساب المشاهدة ✓"));
         } else if (flush) persist();
       };
       const vis = () => { if (document.hidden) persist(); };
-      const leave = () => { clearInterval(tm); document.removeEventListener("visibilitychange", vis); return persist(); };
-      const hasVid = items.some(m => m.t === "video");
-      el.innerHTML = `<div class="card"><button id="bk" class="lnk" type="button">${ic("back", 18)} رجوع</button><h2 class="h" style="margin-top:10px">${esc(p.title)}</h2>${items.length ? items.map((m, i) => m.t === "video" ? `<div class="item"><b>${esc(m.n || "فيديو")}</b><video class="vp" controls playsinline preload="metadata" src="${esc(m.u)}" data-v="${i}"></video><div class="bar"><i id="b${i}"></i></div><small class="muted" id="t${i}"></small></div>` : `<div class="item"><a class="btn s sm" style="text-decoration:none" href="${esc(m.u)}" target="_blank" rel="noopener">${m.t === "pdf" ? "فتح الملف (PDF)" : "فتح الرابط"}${m.n ? " · " + esc(m.n) : ""}</a></div>`).join("") : '<p class="muted center">المدرس لسه ما رفعش المحتوى.</p>'}<p id="st" class="muted small">${prog[p.id] ? "✓ تم احتساب الجزء ده" : hasVid ? "الجزء بيتحسب لما تشاهد 90% من الفيديو فعلياً. التقديم مش بيتحسب." : ""}</p>${!hasVid && items.length && !prog[p.id] ? '<button id="dn" class="btn p full" type="button">تم</button>' : ""}</div>`;
+      const leave = () => { dead = true; clearInterval(tm); document.removeEventListener("visibilitychange", vis); trk.forEach(t => { try { t.tr.stop && t.tr.stop(); t.pl && t.pl.destroy(); } catch (e) {} }); return persist(); };
+      const hasVid = vidN > 0;
+      el.innerHTML = `<div class="card"><button id="bk" class="lnk" type="button">${ic("back", 18)} رجوع</button><h2 class="h" style="margin-top:10px">${esc(p.title)}</h2>${items.length ? items.map((m, i) => m.t === "video" ? `<div class="item"><b>${esc(m.n || "فيديو")}</b><video class="vp" controls playsinline preload="metadata" src="${esc(m.u)}" data-v="${i}"></video><div class="bar"><i id="b${i}"></i></div><small class="muted" id="t${i}"></small></div>` : m.t === "yt" ? `<div class="item"><b>${esc(m.n || "فيديو")}</b><div class="ytw"><div id="y${i}"></div></div><div class="bar"><i id="b${i}"></i></div><small class="muted" id="t${i}"></small></div>` : `<div class="item"><a class="btn s sm" style="text-decoration:none" href="${esc(m.u)}" target="_blank" rel="noopener">${m.t === "pdf" ? "فتح الملف (PDF)" : "فتح الرابط"}${m.n ? " · " + esc(m.n) : ""}</a></div>`).join("") : '<p class="muted center">المدرس لسه ما رفعش المحتوى.</p>'}<p id="st" class="muted small">${prog[p.id] ? "✓ تم احتساب الجزء ده" : hasVid ? "الجزء بيتحسب لما تشاهد 90% من الفيديو فعلياً. التقديم مش بيتحسب." : ""}</p>${!hasVid && items.length && !prog[p.id] ? '<button id="dn" class="btn p full" type="button">تم</button>' : ""}</div>`;
       el.querySelectorAll("video[data-v]").forEach(v => { const i = +v.dataset.v; trk.push({i, tr: track(v, w[i], paint)}); v.addEventListener("loadedmetadata", () => paint(false)); });
+      const yts = items.map((m, i) => ({m, i})).filter(x => x.m.t === "yt");
+      if (yts.length) ytReady().then(() => {
+        if (dead) return;
+        yts.forEach(({m, i}) => { const pl = new window.YT.Player("y" + i, {width: "100%", height: "100%", videoId: m.id, playerVars: {playsinline: 1, rel: 0, modestbranding: 1}}); trk.push({i, tr: trackYT(pl, w[i], paint), pl}); });
+        paint(false); dirty = false;
+      }).catch(() => { const st = $("#st", el); if (st) st.textContent = "تعذّر تحميل مشغّل الفيديو. تأكد من الإنترنت وحاول تاني."; });
       paint(false); dirty = false;
       tm = setInterval(() => persist(), 15000);
       document.addEventListener("visibilitychange", vis);
