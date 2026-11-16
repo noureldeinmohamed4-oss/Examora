@@ -100,8 +100,15 @@ ${q.type === "mcq" ? q.options.map((o, k) => `<div class="optrow"><input type="r
   draw();
 }
 
-export async function examSolve(el, uid, ex, att, back){
+const wmUrl = who => {
+  const t = esc(String(who || "Examora").slice(0, 44));
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="270" height="150"><text x="20" y="85" transform="rotate(-25 135 75)" font-size="17" font-family="sans-serif" fill="#808080" fill-opacity=".22">${t}</text></svg>`;
+  return "data:image/svg+xml," + encodeURIComponent(svg);
+};
+
+export async function examSolve(el, uid, ex, att, back, who){
   const id = ex.id + "_" + uid;
+  const wm = `<div class="wm" aria-hidden="true" style="background-image:url('${wmUrl((who || "Examora") + " · " + uid.slice(0, 4))}')"></div>`;
   try {
     if (!att) {
       const n = Date.now();
@@ -138,7 +145,7 @@ export async function examSolve(el, uid, ex, att, back){
     const body = q.type === "mcq" ? q.options.map((o, k) => o ? `<button type="button" class="opt${ans[q.id] === k ? " on" : ""}" data-o="${k}">${esc(o)}</button>` : "").join("")
       : q.type === "tf" ? [["1", "صح"], ["0", "خطأ"]].map(([v, t]) => `<button type="button" class="opt${ans[q.id] === (v === "1") ? " on" : ""}" data-o="${v}">${t}</button>`).join("")
       : `<textarea id="ea" class="plain" rows="7" placeholder="اكتب إجابتك هنا" style="margin-top:10px">${esc(ans[q.id] || "")}</textarea><div>${(ans[q.id + "_i"] || []).filter(isCl).map((u, k) => `<span class="th"><img class="im" src="${esc(u)}" alt="" style="width:96px;margin:4px"><button class="ab" type="button" data-ri="${k}" aria-label="مسح">${ic("trash", 16)}</button></span>`).join("")}</div>${(ans[q.id + "_i"] || []).length < 3 ? '<button id="ei" class="btn s sm" type="button" style="margin-top:8px">+ صورة إجابة</button>' : ""}`;
-    el.innerHTML = `<div class="card"><div class="exbar"><b id="tm" dir="ltr"></b><span class="muted">سؤال ${cur + 1} من ${qs.length}</span></div><div class="nocopy"><p class="qt">${esc(q.text)}</p>${urlImgs(q.imgs)}${body}</div><div class="acts">${cur > 0 ? '<button id="pv" class="btn s" type="button" style="flex:1">السابق</button>' : ""}${cur < qs.length - 1 ? '<button id="nx" class="btn p" type="button" style="flex:1">التالي</button>' : '<button id="sb" class="btn p" type="button" style="flex:1">تسليم</button>'}</div><div class="grid">${qs.map((x, i) => `<button type="button" class="gb${has(x) ? " ok" : ""}${i === cur ? " cur" : ""}" data-g="${i}" aria-label="سؤال ${i + 1}">${i + 1}</button>`).join("")}</div></div>`;
+    el.innerHTML = `<div class="card"><div class="exbar"><b id="tm" dir="ltr"></b><span class="muted">سؤال ${cur + 1} من ${qs.length}</span></div><div class="nocopy"><p class="qt">${esc(q.text)}</p>${urlImgs(q.imgs)}${body}</div><div class="acts">${cur > 0 ? '<button id="pv" class="btn s" type="button" style="flex:1">السابق</button>' : ""}${cur < qs.length - 1 ? '<button id="nx" class="btn p" type="button" style="flex:1">التالي</button>' : '<button id="sb" class="btn p" type="button" style="flex:1">تسليم</button>'}</div><div class="grid">${qs.map((x, i) => `<button type="button" class="gb${has(x) ? " ok" : ""}${i === cur ? " cur" : ""}" data-g="${i}" aria-label="سؤال ${i + 1}">${i + 1}</button>`).join("")}</div></div>${wm}`;
     tick();
     el.querySelectorAll("[data-o]").forEach(b => b.onclick = () => {
       const v = q.type === "tf" ? b.dataset.o === "1" : +b.dataset.o;

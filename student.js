@@ -190,7 +190,7 @@ export async function renderStudent(el, uid, d){
     };
     el.querySelectorAll("[data-ev]").forEach(b => b.onclick = () => explain(pmap[b.dataset.ev]));
     el.querySelectorAll("[data-hw]").forEach(b => b.onclick = () => hwStudent(el, uid, l.teacherUid, hws[b.dataset.hw], subs[b.dataset.hw], back));
-    el.querySelectorAll("[data-sx]").forEach(b => b.onclick = () => examSolve(el, uid, exs[b.dataset.sx], atts[b.dataset.sx], back));
+    el.querySelectorAll("[data-sx]").forEach(b => b.onclick = () => examSolve(el, uid, exs[b.dataset.sx], atts[b.dataset.sx], back, d.name));
     el.querySelectorAll("[data-rv]").forEach(b => b.onclick = () => review(exs[b.dataset.rv], atts[b.dataset.rv], back));
   }
 
