@@ -122,7 +122,15 @@ export async function examSolve(el, uid, ex, att, back, who){
   const dl = Math.min(att.startedAt.toMillis() + ex.duration * 60000, ex.end), qs = ex.questions;
   const ans = {...att.answers};
   let cur = 0, done = false, tm, dbn, hidAt = 0, hidP = false;
-  const exits = [...(att.exits || [])];
+  const exits = [...(att.exits || [])], blurs = [...(att.blurs || [])];
+  let blAt = 0, blP = false, blX = 0, quiet = 0;
+  const onBlur = () => { if (done || blAt || Date.now() < quiet) return; blAt = Date.now(); blP = pick.active; blX = exits.length; };
+  const onFocus = () => {
+    if (!blAt) return;
+    const t0 = blAt, d = Math.round((Date.now() - t0) / 1000), p = blP, x0 = blX; blAt = 0;
+    setTimeout(() => { if (done || d < 2 || exits.length > x0) return; blurs.push({t: t0, d, ...(p ? {p: 1} : {})}); updateDoc(doc(db, "attempts", id), {blurs}).catch(() => {}); }, 400);
+  };
+  window.addEventListener("blur", onBlur); window.addEventListener("focus", onFocus);
   const vis = () => { if (done) return; if (document.hidden) { hidAt = Date.now(); hidP = pick.active; } else if (hidAt) { exits.push({t: hidAt, d: Math.round((Date.now() - hidAt) / 1000), ...(hidP ? {p: 1} : {})}); hidAt = 0; updateDoc(doc(db, "attempts", id), {exits}).catch(() => {}); } };
   document.addEventListener("visibilitychange", vis);
   el.oncopy = el.oncut = el.onpaste = el.oncontextmenu = e => e.preventDefault();
@@ -130,7 +138,7 @@ export async function examSolve(el, uid, ex, att, back, who){
   const putk = (k, v) => { if (v === null || v === "") { delete ans[k]; v = deleteField(); } else ans[k] = v; updateDoc(doc(db, "attempts", id), {["answers." + k]: v}).catch(() => {}); };
   const put = (q, v) => putk(q.id, v);
   const finish = () => {
-    if (done) return; done = true; clearInterval(tm); document.removeEventListener("visibilitychange", vis);
+    if (done) return; done = true; clearInterval(tm); document.removeEventListener("visibilitychange", vis); window.removeEventListener("blur", onBlur); window.removeEventListener("focus", onFocus);
     el.oncopy = el.oncut = el.onpaste = el.oncontextmenu = null;
     updateDoc(doc(db, "attempts", id), {submitted: true, submittedAt: serverTimestamp()}).catch(() => {});
     el.innerHTML = '<div class="card center"><h2 class="h">تم تسليم الامتحان</h2><p class="muted">النتيجة هتظهر بعد ما المدرس يخلّص التصحيح.</p><button id="bk" class="btn p full" type="button">رجوع</button></div>';
@@ -167,7 +175,10 @@ export async function examSolve(el, uid, ex, att, back, who){
     if (nx) nx.onclick = () => { cur++; draw(); };
     if (sb) sb.onclick = () => {
       const miss = qs.map((x, i) => has(x) ? 0 : i + 1).filter(Boolean);
-      if (confirm(miss.length ? `الأسئلة رقم ${miss.join("، ")} ما اتحلتش. متأكد إنك عايز تسلّم؟` : "متأكد إنك عايز تسلّم؟")) finish();
+      quiet = Infinity;
+      const yes = confirm(miss.length ? `الأسئلة رقم ${miss.join("، ")} ما اتحلتش. متأكد إنك عايز تسلّم؟` : "متأكد إنك عايز تسلّم؟");
+      quiet = Date.now() + 1500; blAt = 0;
+      if (yes) finish();
     };
   };
   tm = setInterval(tick, 1000);
