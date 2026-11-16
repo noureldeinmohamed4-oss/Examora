@@ -183,7 +183,7 @@ export async function renderStudent(el, uid, d){
         };
       });
       paint(false); dirty = false;
-      tm = setInterval(() => persist(), 15000);
+      tm = setInterval(() => persist(), 60000);
       document.addEventListener("visibilitychange", vis);
       $("#bk", el).onclick = () => leave().then(back);
       const dn = $("#dn", el); if (dn) dn.onclick = () => run(async () => { prog[p.id] = 1; await persist(true); back(); });
