@@ -148,3 +148,9 @@ input:focus-visible,select:focus-visible,button:focus-visible{outline:3px solid 
 .gc b{font-size:15px;font-weight:600}
 .gc small{color:var(--muted);font-weight:400;font-size:12px;white-space:nowrap}
 .gc.on{border-color:var(--accent);background:var(--soft);color:var(--primary)}
+
+/* ===== غطاء مشغّل الفيديو (يخفي بيانات المشغّل وقت الإيقاف) ===== */
+.ytw>.ytcv{z-index:3;background:#0b0b0b;color:#fff;display:grid;place-items:center;text-align:center;padding:12px;font-size:16px;font-weight:600;cursor:pointer}
+.ytw>.ytcv[hidden]{display:none}
+.ytw>.ytmt{z-index:2;bottom:auto;height:32%;background:linear-gradient(#000 0,#000 62%,transparent);pointer-events:none}
+.ytw>.ytmt[hidden]{display:none}

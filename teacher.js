@@ -423,7 +423,7 @@ ${lects.map(l => `<div class="card" style="margin-top:14px"><b>${esc(l.title)}</
           if (k === "vlink") {
             const u = (prompt("الصق رابط الفيديو (يوتيوب أو رابط mp4 مباشر يبدأ بـ https)") || "").trim(); if (!u) return;
             const y = ytId(u);
-            if (y) r = [{t: "yt", id: y, u, n: "فيديو يوتيوب"}];
+            if (y) r = [{t: "yt", id: y, u, n: "فيديو"}];
             else if (/^https:\/\/.+\.(mp4|webm|m4v)(\?.*)?$/i.test(u)) r = [{t: "video", u, x: 1, n: "فيديو"}];
             else return toast("الرابط لازم يكون فيديو يوتيوب أو mp4 مباشر");
           } else r = await pickUpload({kinds: [k], max: 1});
