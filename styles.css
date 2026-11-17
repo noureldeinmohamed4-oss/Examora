@@ -125,3 +125,26 @@ input:focus-visible,select:focus-visible,button:focus-visible{outline:3px solid 
 .ab.mn{font-size:20px;line-height:1;font-weight:700}
 .macts{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}.macts .btn{flex:1;min-width:84px}
 .btn.bad{color:var(--bad)}
+
+/* ===== صفحة المدرس (مضغوطة) ===== */
+.tp .card{padding:14px;border-radius:20px;box-shadow:0 4px 16px rgba(31,78,121,.10)}
+.tp .h{font-size:17px;margin-bottom:8px}
+.tp .item{padding:10px 0}
+.tp .btn{font-size:15px}.tp .btn.sm{font-size:13px;padding:7px 12px}.tp .btn.full{padding:11px 16px;margin-top:10px}
+.tp .acts{margin-top:8px}
+.tp .macts{margin-top:8px}
+.tp .code{font-size:20px;letter-spacing:3px}
+.tp .codebox{padding:8px 12px;margin-top:10px;border-radius:12px}
+.tp .stats{gap:6px;margin-top:8px}
+.tp .stat{padding:6px 2px;border-radius:14px}
+.tp .stat b{font-size:18px;line-height:1.2}
+.tp .stat small{font-size:11px}
+.tp .tabs{margin:8px 0 0;padding:3px}
+.tp .tabs button{font-size:13px;padding:7px 2px}
+.tp .lb{margin-top:10px}
+.tp .addrow{margin-bottom:8px}
+.gl{display:grid;gap:6px;margin-top:6px}
+.gc{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;text-align:start;border:1.5px solid var(--line);background:var(--surface);color:var(--ink);border-radius:14px;padding:9px 12px;font:inherit;transition:border-color .2s,background .2s}
+.gc b{font-size:15px;font-weight:600}
+.gc small{color:var(--muted);font-weight:400;font-size:12px;white-space:nowrap}
+.gc.on{border-color:var(--accent);background:var(--soft);color:var(--primary)}

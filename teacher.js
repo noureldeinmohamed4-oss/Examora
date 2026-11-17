@@ -175,7 +175,7 @@ export async function renderTeacher(el, uid, d){
   const groupCard = () => {
     const g = curG(), open = gform || !groups.length;
     return `<div class="card tch"><b>${esc(d.name)}</b><small class="muted" style="display:block">مدرس · ${esc(d.subject)}</small>
-${groups.length ? `<label class="lb">المجموعة (الصف)</label><select id="gs" class="plain" aria-label="المجموعة">${groups.map(x => `<option value="${x.id}"${x.id === gsel ? " selected" : ""}>${esc(gname(x))}</option>`).join("")}</select>` : '<p class="muted small" style="margin-top:12px">اعمل أول مجموعة: اختار الصف وهيتولّد لها كود تبعته للطلاب.</p>'}
+${groups.length ? `<small class="muted" style="display:block;margin-top:10px">المجموعات (${groups.length} من ${MAXG})</small><div class="gl">${groups.map(x => `<button type="button" class="gc${x.id === gsel ? " on" : ""}" data-g="${x.id}"><b>${esc(gname(x))}</b><small>${stu.filter(y => y.groupId === x.id).length} طالب${x.code ? ` · <span dir="ltr">${esc(x.code)}</span>` : " · كود مقفول"}</small></button>`).join("")}</div>` : '<p class="muted small" style="margin-top:12px">اعمل أول مجموعة: اختار الصف وهيتولّد لها كود تبعته للطلاب.</p>'}
 <div class="acts"><button id="gn" class="btn s sm" type="button">+ مجموعة جديدة</button>${g ? '<button id="gm" class="btn s sm" type="button">⋯ إدارة المجموعة</button>' : ""}</div>
 ${open ? `<div style="margin-top:10px">${gForm("new")}<div class="acts"><button id="gc" class="btn p sm" type="button">إنشاء</button>${groups.length ? '<button id="gx" class="btn s sm" type="button">إلغاء</button>' : ""}</div></div>` : ""}
 ${g ? codeBox(g) : ""}
@@ -234,8 +234,8 @@ ${g && gmenu ? `<div class="item" style="margin-top:10px"><b>تعديل اسم �
     } catch (e) { toast("تعذّر حساب البيانات، حاول تاني"); return home(); }
     const n = refs.length + 2;
     if (!confirm("هيتمسح " + n + " عنصر (محاضرات وامتحانات وواجبات وتسليمات وإجابات وطلاب)، وده بيستهلك " + n + " من حد الكتابة اليومي (20 ألف). مفيش رجوع. تكمّل؟")) return home();
-    const t = prompt("للتأكيد اكتب اسم المجموعة بالظبط:\n" + nm);
-    if (t == null || t.trim() !== nm) { toast("الاسم مش مطابق، المسح اتلغى"); return home(); }
+    const t = prompt("للتأكيد اكتب العبارة دي بالظبط (إنجليزي):\n\ndelete my files");
+    if (t == null || t.trim().toLowerCase() !== "delete my files") { toast("العبارة مش مطابقة، المسح اتلغى"); return home(); }
     const ds = () => $("#ds", el);
     try {
       if (g.code && (await getDoc(doc(db, "codes", g.code))).exists()) await deleteDoc(doc(db, "codes", g.code));
@@ -254,8 +254,7 @@ ${g && gmenu ? `<div class="item" style="margin-top:10px"><b>تعديل اسم �
   const bindGroup = () => {
     const on = (id, fn) => { const b = $("#" + id, el); if (b) b.onclick = fn; };
     const msg = m => { const x = $("#gmsg", el); if (x) x.textContent = m || ""; };
-    const sel = $("#gs", el);
-    if (sel) sel.onchange = () => run(async () => { gsel = sel.value; gmenu = false; gform = false; gmsg = ""; hl = hp = null; sq = ""; showAll = false; gr = null; menu = null; addOpen = false; await loadLects(); home(); });
+    el.querySelectorAll("[data-g]").forEach(b => b.onclick = () => { if (b.dataset.g === gsel) return; run(async () => { gsel = b.dataset.g; gmenu = false; gform = false; gmsg = ""; hl = hp = null; sq = ""; showAll = false; gr = null; menu = null; addOpen = false; await loadLects(); home(); }); });
     on("gn", () => { gform = !gform; gmenu = false; gmsg = ""; home(); });
     on("gx", () => { gform = false; gmsg = ""; home(); });
     on("gm", () => { gmenu = !gmenu; gform = false; gmsg = ""; home(); });
@@ -273,10 +272,10 @@ ${g && gmenu ? `<div class="item" style="margin-top:10px"><b>تعديل اسم �
     const gd = gr && !grErr ? grData() : null, pend = gd ? gd.pend.length : null, n = stu.filter(x => x.groupId === gsel).length;
     const body = !gsel ? '<p class="muted center small">اعمل أول مجموعة عشان تبدأ تضيف محاضرات وتستقبل طلاب.</p>' : tab === "stu" ? stuTab() : tab === "hw" ? hwTab() : tab === "gr" ? grTab(gd) : lecTab();
     const tabs = [["lec", "المحاضرات"], ["stu", "الطلاب"], ["hw", "الواجبات"], ["gr", "التصحيح" + (pend ? " (" + pend + ")" : "")]];
-    el.innerHTML = `${groupCard()}
+    el.innerHTML = `<div class="tp">${groupCard()}
 <div class="stats"><button class="stat" type="button" data-tb="lec"><b>${lects.length}</b><small>محاضرة</small></button><button class="stat" type="button" data-tb="stu"><b>${n}</b><small>طالب</small></button><button class="stat${pend ? " hot" : ""}" type="button" data-tb="gr"><b>${pend == null ? "—" : pend}</b><small>محتاج تصحيح</small></button></div>
 <div class="tabs" style="margin-top:12px">${tabs.map(([k, t]) => `<button type="button" data-tb="${k}" class="${k === tab ? "on" : ""}">${t}</button>`).join("")}</div>
-<div class="card" style="margin-top:8px">${body}</div>`;
+<div class="card" style="margin-top:8px">${body}</div></div>`;
     el.querySelectorAll("[data-tb]").forEach(b => b.onclick = () => { tab = b.dataset.tb; home(); if (tab === "gr" && !gr && !grBusy) loadGr().then(home); });
     bindGroup();
     if (!gsel) { el.querySelectorAll(".stats,.tabs").forEach(x => x.remove()); return; }
