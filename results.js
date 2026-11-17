@@ -7,7 +7,7 @@ const ms = t => t && t.toMillis ? t.toMillis() : 0;
 const mm = s => Math.floor(s / 60) + ":" + String(Math.floor(s % 60)).padStart(2, "0");
 const ft = t => new Date(t).toLocaleTimeString("ar-EG", {hour: "2-digit", minute: "2-digit"});
 
-export async function examResults(el, uid, exam, back){
+export async function examResults(el, uid, exam, back, openId){
   el.innerHTML = '<p class="muted center">جاري التحميل…</p>';
   let key = {}, names = {}, atts = [];
   try {
@@ -117,5 +117,6 @@ ${atts.length && atts.every(a => !a.ip) ? '<p class="err small">الـ IP مش �
       await updateDoc(doc(db, "attempts", a.id), {grades: g}); a.grades = g; toast("تم الحفظ (اضغط تحديث النتيجة لو كانت ظاهرة)"); home();
     });
   }
-  home();
+  const first = openId && atts.find(a => a.id === openId);
+  if (first) paper(first); else home();
 }

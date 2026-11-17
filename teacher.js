@@ -1,8 +1,9 @@
 import {db} from "./firebase.js";
-import {collection, query, where, getDocs, doc, addDoc, updateDoc, deleteDoc, writeBatch, serverTimestamp} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import {collection, query, where, getDocs, getDoc, doc, addDoc, updateDoc, deleteDoc, writeBatch, serverTimestamp} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {$, esc, toast, ic} from "./ui.js";
 import {examBuilder} from "./exam.js";
-import {hwBuilder} from "./homework.js";
+import {hwBuilder, hwSubView} from "./homework.js";
+import {examResults} from "./results.js";
 import {pickUpload, upMsg} from "./media.js";
 
 const TYPES = {explain: ["شرح", "vid"], homework: ["واجب", "doc"], exam: ["امتحان", "exam"]};
@@ -12,10 +13,25 @@ const genCode = () => Array.from(crypto.getRandomValues(new Uint8Array(6)), n =>
 const ytId = u => { const m = String(u || "").trim().match(/^https?:\/\/(?:www\.|m\.)?(?:youtube\.com\/(?:watch\?(?:.*&)?v=|shorts\/|embed\/|live\/)|youtu\.be\/)([A-Za-z0-9_-]{11})(?:[?&#\/].*)?$/); return m ? m[1] : ""; };
 const mc = p => { const n = (p.media || []).length + (!p.media && p.url ? 1 : 0); return n ? n + " ملف" : "لسه فاضي"; };
 
+const tms = t => t && t.toMillis ? t.toMillis() : 0;
+const dayFmt = ms => new Date(ms).toLocaleDateString("ar-EG", {weekday: "long", day: "numeric", month: "long", year: "numeric"});
+const fullFmt = ms => new Date(ms).toLocaleString("ar-EG", {weekday: "long", day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit"});
+const ago = ms => {
+  const s = Math.max(0, (Date.now() - ms) / 1000);
+  if (s < 120) return "دلوقتي";
+  if (s < 3600) return "من " + Math.floor(s / 60) + " دقيقة";
+  if (s < 86400) { const h = Math.floor(s / 3600); return h === 1 ? "من ساعة" : h === 2 ? "من ساعتين" : h <= 10 ? "من " + h + " ساعات" : "من " + h + " ساعة"; }
+  const d = Math.floor(s / 86400);
+  return d === 1 ? "من يوم" : d === 2 ? "من يومين" : d <= 10 ? "من " + d + " أيام" : "من " + d + " يوم";
+};
+const tel = n => n ? `<a href="tel:${esc(n)}" dir="ltr">${esc(n)}</a>` : "—";
+const exOut = a => (a.exits || []).filter(x => !(x.p && x.d <= 90));
+
 export async function renderTeacher(el, uid, d){
   let lects = [], stu = [], cur = null, code = d.code, subsAll = [], subsErr = false, tab = "lec", addOpen = false, menu = null, pm = null, sq = "", showAll = false;
+  let info = {}, gr = null, grErr = false, grBusy = false, hl = null, hp = null;
   const loadSubs = async () => { try { subsAll = (await getDocs(query(collection(db, "subs"), where("teacherUid", "==", uid)))).docs.map(x => ({id: x.id, ...x.data()})); subsErr = false; } catch (e) { subsErr = true; } };
-  const hc = id => { const a = subsAll.filter(s => s.partId === id), n = a.filter(s => !s.graded).length; return a.length ? a.length + " تسليم" + (n ? " · " + n + " جديد" : "") : "لسه ما حدش سلّم"; };
+  const hc = id => { const n = subsAll.filter(s => s.partId === id).length; return n ? n + " تسليم" : "لسه ما حدش سلّم"; };
   const load = async () => {
     const s = await getDocs(query(collection(db, "lectures"), where("teacherUid", "==", uid)));
     lects = s.docs.map(x => ({id: x.id, ...x.data()})).sort((a, b) => a.order - b.order);
@@ -23,48 +39,122 @@ export async function renderTeacher(el, uid, d){
     stu = s2.docs.map(x => ({id: x.id, ...x.data()}));
     await loadSubs();
   };
-  const pendList = () => {
-    const parts = {}; lects.forEach(l => l.parts.forEach(p => { if (p.type === "homework") parts[p.id] = {l, p}; }));
-    const nm = {}; stu.forEach(x => { nm[x.studentUid] = x.studentName; });
-    return {parts, nm, list: subsAll.filter(s => !s.graded && parts[s.partId]).sort((x, y) => (y.createdAt?.seconds || 0) - (x.createdAt?.seconds || 0))};
+  const nameMap = () => { const m = {}; stu.forEach(x => { m[x.studentUid] = x.studentName; }); return m; };
+  const loadGr = async () => {
+    if (grBusy) return;
+    grBusy = true; grErr = false;
+    try {
+      const [E, A] = await Promise.all([getDocs(query(collection(db, "exams"), where("teacherUid", "==", uid))), getDocs(query(collection(db, "attempts"), where("teacherUid", "==", uid)))]);
+      gr = {exams: E.docs.map(x => ({id: x.id, ...x.data()})), atts: A.docs.map(x => ({id: x.id, ...x.data()}))};
+    } catch (e) { grErr = true; gr = null; }
+    grBusy = false;
+  };
+  const grData = () => {
+    const byEx = {}; gr.exams.forEach(e => { byEx[e.id] = e; });
+    const pend = [], rv = {}, cnt = {};
+    gr.atts.forEach(a => {
+      const e = byEx[a.examId]; if (!e) return;
+      cnt[e.id] = (cnt[e.id] || 0) + 1;
+      const fin = a.submitted || Date.now() > e.end + 20000;
+      if (fin && (e.questions || []).some(q => q.type === "essay" && (a.grades || {})[q.id] == null)) pend.push({a, e});
+      const n = Object.keys(a.reviews || {}).length; if (n) rv[e.id] = (rv[e.id] || 0) + n;
+    });
+    pend.sort((x, y) => tms(y.a.submittedAt) - tms(x.a.submittedAt));
+    return {pend, rv, cnt, exams: [...gr.exams].sort((x, y) => (y.start || 0) - (x.start || 0))};
+  };
+  const backGr = () => { gr = null; home(); loadGr().then(home); };
+
+  /* ---------- الطلاب ---------- */
+  const stuAll = () => {
+    const k = sq.trim().toLowerCase();
+    return stu.filter(x => x.code === code && (!k || String(x.studentName || "").toLowerCase().includes(k))).sort((x, y) => String(x.studentName || "").localeCompare(String(y.studentName || ""), "ar"));
+  };
+  const stuShown = () => { const all = stuAll(); return {all, sh: sq.trim() || showAll ? all : all.slice(0, 10)}; };
+  const seenTxt = x => {
+    const i = info[x.studentUid];
+    if (!i || i.loading) return "جاري التحميل…";
+    if (i.err) return "تعذّر تحميل آخر ظهور";
+    return "آخر ظهور: " + (i.seen ? ago(i.seen) : "لسه ما ظهرش") + (i.created ? " · سجّل: " + dayFmt(i.created) : "");
   };
   const stuList = () => {
-    const k = sq.trim().toLowerCase();
-    const all = stu.filter(x => x.code === code && (!k || String(x.studentName || "").toLowerCase().includes(k))).sort((x, y) => String(x.studentName || "").localeCompare(String(y.studentName || ""), "ar"));
-    if (!all.length) return `<p class="muted center small">${k ? "مفيش نتايج." : "لسه مفيش طلاب. ابعت كودك للطلاب."}</p>`;
-    const sh = k || showAll ? all : all.slice(0, 10);
-    return sh.map(x => `<div class="item lrow"><div class="lt"><b>${esc(x.studentName)}</b><small>${x.status === "suspended" ? "موقوف" : "نشط"}</small></div><button class="btn s sm" type="button" data-st="${x.id}" data-to="${x.status === "suspended" ? "active" : "suspended"}">${x.status === "suspended" ? "تفعيل" : "إيقاف"}</button></div>`).join("") + (sh.length < all.length ? `<button id="sa" class="btn s full" type="button">عرض الكل (${all.length})</button>` : "");
+    const {all, sh} = stuShown();
+    if (!all.length) return `<p class="muted center small">${sq.trim() ? "مفيش نتايج." : "لسه مفيش طلاب. ابعت كودك للطلاب."}</p>`;
+    return sh.map(x => `<div class="item lrow"><div class="lt" data-sd="${x.studentUid}"><b>${esc(x.studentName)}</b><small>${x.status === "suspended" ? "موقوف" : "نشط"}</small><small>${seenTxt(x)}</small></div><button class="btn s sm" type="button" data-st="${x.id}" data-to="${x.status === "suspended" ? "active" : "suspended"}">${x.status === "suspended" ? "تفعيل" : "إيقاف"}</button></div>`).join("") + (sh.length < all.length ? `<button id="sa" class="btn s full" type="button">عرض الكل (${all.length})</button>` : "");
   };
-  const stuTab = () => `<input id="sq" class="plain" placeholder="بحث باسم الطالب" aria-label="بحث باسم الطالب" value="${esc(sq)}" style="margin-bottom:8px"><div id="sl">${stuList()}</div>`;
-  const grTab = () => {
+  const stuTab = () => `<input id="sq" class="plain" placeholder="بحث باسم الطالب" aria-label="بحث باسم الطالب" value="${esc(sq)}" style="margin-bottom:8px"><p class="muted small">دوس على اسم الطالب تشوف تفاصيله.</p><div id="sl">${stuList()}</div>`;
+  const fill = async () => {
+    const need = stuShown().sh.map(x => x.studentUid).filter(u => !info[u]);
+    if (!need.length) return;
+    need.forEach(u => { info[u] = {loading: true}; });
+    await Promise.all(need.map(async u => {
+      const o = {};
+      try {
+        const [s, g] = await Promise.all([getDoc(doc(db, "sessions", u)), getDoc(doc(db, "users", u))]);
+        o.seen = s.exists() ? tms(s.data().at) : 0;
+        o.created = g.exists() ? tms(g.data().createdAt) : 0;
+      } catch (e) { o.err = true; }
+      info[u] = o;
+    }));
+    const sl = $("#sl", el);
+    if (tab === "stu" && sl) { sl.innerHTML = stuList(); bindStu(); }
+  };
+  const bindStu = () => {
+    el.querySelectorAll("[data-st]").forEach(b => b.onclick = () => run(async () => { if (b.dataset.to === "suspended" && !confirm("إيقاف الطالب ده من عندك؟")) return; await updateDoc(doc(db, "links", b.dataset.st), {status: b.dataset.to}); stu.find(y => y.id === b.dataset.st).status = b.dataset.to; home(); }));
+    el.querySelectorAll("[data-sd]").forEach(b => b.onclick = () => student(stu.find(y => y.studentUid === b.dataset.sd)));
+    const sa = $("#sa", el); if (sa) sa.onclick = () => { showAll = true; home(); };
+  };
+
+  /* ---------- الواجبات ---------- */
+  const hwTab = () => {
     if (subsErr) return '<p class="err center small">تعذّر تحميل التسليمات. تأكد من الإنترنت وقواعد Firestore.</p>';
-    const {parts, nm, list} = pendList();
-    return list.length ? list.map(s => `<div class="item lrow"><div class="lt"><b>${esc(nm[s.studentUid] || "طالب")}</b><small>${esc(parts[s.partId].p.title)} · ${esc(parts[s.partId].l.title)}</small></div><button class="btn p sm" type="button" data-gs="${s.id}">تصحيح</button></div>`).join("") : '<p class="muted center small">مفيش حاجة مستنية تصحيح ✓</p>';
+    const act = stu.filter(x => x.code === code);
+    const bk = k => `<button class="lnk" type="button" data-hb="${k}">${ic("back", 18)} رجوع</button>`;
+    const L = lects.find(x => x.id === hl), P = L && L.parts.find(p => p.id === hp && p.type === "homework");
+    if (L && P) {
+      const by = {}; subsAll.filter(s => s.partId === P.id).forEach(s => { by[s.studentUid] = s; });
+      const done = act.filter(x => by[x.studentUid]).sort((x, y) => tms(by[y.studentUid].createdAt) - tms(by[x.studentUid].createdAt)), left = act.filter(x => !by[x.studentUid]);
+      return `${bk("lec")}<h2 class="h" style="margin-top:10px">${esc(P.title)}</h2><p class="muted small">${esc(L.title)} · سلّم ${done.length} من ${act.length}</p>
+<b>لسه ما سلّموش (${left.length})</b>${left.length ? left.map(x => `<div class="item"><b>${esc(x.studentName)}</b></div>`).join("") : '<p class="muted small">الكل سلّم ✓</p>'}
+<b style="display:block;margin-top:14px">سلّموا (${done.length})</b>${done.length ? done.map(x => { const s = by[x.studentUid]; return `<div class="item lrow"><div class="lt"><b>${esc(x.studentName)}</b><small>${tms(s.createdAt) ? fullFmt(tms(s.createdAt)) : ""}</small></div><button class="btn p sm" type="button" data-sv="${s.id}">فتح</button></div>`; }).join("") : '<p class="muted small">لسه ما حدش سلّم.</p>'}`;
+    }
+    if (L) {
+      const hs = L.parts.filter(p => p.type === "homework");
+      return `${bk("list")}<h2 class="h" style="margin-top:10px">${esc(L.title)}</h2>${hs.length ? hs.map(p => { const n = act.filter(x => subsAll.some(s => s.partId === p.id && s.studentUid === x.studentUid)).length; return `<div class="item lrow"><div class="lt" data-hp="${p.id}"><b>${esc(p.title)}</b><small>سلّم ${n} من ${act.length}</small></div></div>`; }).join("") : '<p class="muted center small">مفيش واجبات في المحاضرة دي.</p>'}`;
+    }
+    const hl2 = lects.filter(l => l.parts.some(p => p.type === "homework"));
+    return hl2.length ? '<p class="muted small">اختار المحاضرة:</p>' + hl2.map(l => { const ids = l.parts.filter(p => p.type === "homework").map(p => p.id); return `<div class="item lrow"><div class="lt" data-hl="${l.id}"><b>${esc(l.title)}</b><small>${ids.length} واجب · ${subsAll.filter(s => ids.includes(s.partId)).length} تسليم</small></div></div>`; }).join("") : '<p class="muted center small">لسه مفيش واجبات. ضيف جزء "واجب" جوا محاضرة.</p>';
   };
+
+  /* ---------- التصحيح (امتحانات) ---------- */
+  const grTab = gd => {
+    const ref = '<button class="btn s sm" type="button" data-gref="1">تحديث</button>';
+    if (grErr) return '<p class="err center small">تعذّر تحميل البيانات. تأكد من الإنترنت وقواعد Firestore.</p>' + ref;
+    if (!gd) return '<p class="muted center small">جاري التحميل…</p>';
+    const nm = nameMap(), lt = {}; lects.forEach(l => { lt[l.id] = l.title; });
+    return `<div class="lrow"><b class="lt">أوراق مقالي مستنية التصحيح (${gd.pend.length})</b>${ref}</div>${gd.pend.length ? gd.pend.map(({a, e}) => `<div class="item lrow"><div class="lt"><b>${esc(nm[a.studentUid] || "طالب")}</b><small>${esc(e.title)}${lt[e.lectureId] ? " · " + esc(lt[e.lectureId]) : ""}</small></div><button class="btn p sm" type="button" data-gp="${a.id}">تصحيح</button></div>`).join("") : '<p class="muted center small">مفيش حاجة مستنية تصحيح ✓</p>'}
+<b style="display:block;margin-top:16px">الامتحانات (${gd.exams.length})</b>${gd.exams.length ? gd.exams.map(e => `<div class="item lrow"><div class="lt"><b>${esc(e.title)}</b><small>دخل ${gd.cnt[e.id] || 0}${gd.rv[e.id] ? " · طلبات مراجعة: " + gd.rv[e.id] : ""}</small></div><button class="btn s sm" type="button" data-ge="${e.id}">النتائج</button></div>`).join("") : '<p class="muted center small">لسه مفيش امتحانات.</p>'}`;
+  };
+
   const lecTab = () => `${addOpen ? '<div class="addrow"><input id="nt" placeholder="اسم المحاضرة (مثال: المحاضرة الأولى)" aria-label="اسم المحاضرة"><button id="add" class="btn p sm" type="button">إضافة</button><button id="nx" class="btn s sm" type="button">إلغاء</button></div>' : '<button id="nl" class="btn p full" type="button" style="margin-top:0">+ محاضرة جديدة</button>'}<div id="ls" style="margin-top:8px">${lects.length ? lects.map((l, i) => `<div class="item"><div class="lrow"><div class="lt" data-act="open" data-id="${l.id}"><b>${esc(l.title)}</b><small>${l.parts.length} أجزاء · ${l.mode === "open" ? "مفتوحة" : "بالترتيب"}${l.hidden ? " · مخفية" : ""}</small></div><button class="ab mn" type="button" data-mn="${l.id}" aria-label="خيارات">⋯</button></div>${menu === l.id ? `<div class="macts">${i > 0 ? `<button class="btn s sm" type="button" data-act="up" data-id="${l.id}">↑ لفوق</button>` : ""}${i < lects.length - 1 ? `<button class="btn s sm" type="button" data-act="down" data-id="${l.id}">↓ لتحت</button>` : ""}<button class="btn s sm" type="button" data-act="hide" data-id="${l.id}">${l.hidden ? "إظهار للطلاب" : "إخفاء عن الطلاب"}</button><button class="btn s sm bad" type="button" data-act="del" data-id="${l.id}">مسح</button></div>` : ""}</div>`).join("") : '<p class="muted center small">مفيش محاضرات لسه. اضغط "+ محاضرة جديدة".</p>'}</div>`;
   const run = async (fn, ok) => { try { await fn(); if (ok) toast(ok); } catch (e) { toast("حصل خطأ، حاول تاني"); } };
   const save = async (l, patch) => { await updateDoc(doc(db, "lectures", l.id), patch); Object.assign(l, patch); };
   const swap = (arr, i, j) => { if (j < 0 || j >= arr.length) return false; [arr[i], arr[j]] = [arr[j], arr[i]]; return true; };
 
-  const bindStu = () => {
-    el.querySelectorAll("[data-st]").forEach(b => b.onclick = () => run(async () => { if (b.dataset.to === "suspended" && !confirm("إيقاف الطالب ده من عندك؟")) return; await updateDoc(doc(db, "links", b.dataset.st), {status: b.dataset.to}); stu.find(y => y.id === b.dataset.st).status = b.dataset.to; home(); }));
-    const sa = $("#sa", el); if (sa) sa.onclick = () => { showAll = true; home(); };
-  };
-
   function home(){
     cur = null;
-    const pend = subsErr ? 0 : pendList().list.length, n = stu.filter(x => x.code === code).length;
-    const body = tab === "stu" ? stuTab() : tab === "gr" ? grTab() : lecTab();
+    const gd = gr && !grErr ? grData() : null, pend = gd ? gd.pend.length : null, n = stu.filter(x => x.code === code).length;
+    const body = tab === "stu" ? stuTab() : tab === "hw" ? hwTab() : tab === "gr" ? grTab(gd) : lecTab();
+    const tabs = [["lec", "المحاضرات"], ["stu", "الطلاب"], ["hw", "الواجبات"], ["gr", "التصحيح" + (pend ? " (" + pend + ")" : "")]];
     el.innerHTML = `<div class="card"><b>${esc(d.name)}</b><small class="muted" style="display:block">مدرس · ${esc(d.subject)}</small><div class="codebox"><div><small class="muted">كودك</small><b class="code" dir="ltr">${esc(code)}</b></div><div class="acts" style="margin:0"><button id="cp" class="btn s sm" type="button">نسخ</button><button id="cc" class="btn s sm" type="button">تغيير</button></div></div></div>
-<div class="stats"><button class="stat" type="button" data-tb="lec"><b>${lects.length}</b><small>محاضرة</small></button><button class="stat" type="button" data-tb="stu"><b>${n}</b><small>طالب</small></button><button class="stat${pend ? " hot" : ""}" type="button" data-tb="gr"><b>${pend}</b><small>محتاج تصحيح</small></button></div>
-<div class="tabs" style="margin-top:12px">${[["lec", "المحاضرات"], ["stu", "الطلاب"], ["gr", "التصحيح" + (pend ? " (" + pend + ")" : "")]].map(([k, t]) => `<button type="button" data-tb="${k}" class="${k === tab ? "on" : ""}">${t}</button>`).join("")}</div>
+<div class="stats"><button class="stat" type="button" data-tb="lec"><b>${lects.length}</b><small>محاضرة</small></button><button class="stat" type="button" data-tb="stu"><b>${n}</b><small>طالب</small></button><button class="stat${pend ? " hot" : ""}" type="button" data-tb="gr"><b>${pend == null ? "—" : pend}</b><small>محتاج تصحيح</small></button></div>
+<div class="tabs" style="margin-top:12px">${tabs.map(([k, t]) => `<button type="button" data-tb="${k}" class="${k === tab ? "on" : ""}">${t}</button>`).join("")}</div>
 <div class="card" style="margin-top:8px">${body}</div>`;
-    el.querySelectorAll("[data-tb]").forEach(b => b.onclick = () => { tab = b.dataset.tb; home(); });
+    el.querySelectorAll("[data-tb]").forEach(b => b.onclick = () => { tab = b.dataset.tb; home(); if (tab === "gr" && !gr && !grBusy) loadGr().then(home); });
     $("#cp", el).onclick = () => navigator.clipboard.writeText(code).then(() => toast("اتنسخ الكود"), () => toast(code));
     $("#cc", el).onclick = () => run(async () => {
       if (!confirm("تغيير الكود هيفصل طلابك الحاليين لحد ما يكتبوا الكود الجديد. متأكد؟")) return;
       let n = null;
-      for (let i = 0; i < 5 && !n; i++) { const c = genCode(); const {getDoc} = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js"); if (!(await getDoc(doc(db, "codes", c))).exists()) n = c; }
+      for (let i = 0; i < 5 && !n; i++) { const c = genCode(); if (!(await getDoc(doc(db, "codes", c))).exists()) n = c; }
       if (!n) throw 0;
       const b = writeBatch(db);
       b.set(doc(db, "codes", n), {teacherUid: uid, name: d.name, subject: d.subject});
@@ -73,12 +163,26 @@ export async function renderTeacher(el, uid, d){
       await b.commit(); code = n; home();
     }, "تم تغيير الكود");
     if (tab === "stu") {
-      bindStu();
-      $("#sq", el).oninput = e => { sq = e.target.value; $("#sl", el).innerHTML = stuList(); bindStu(); };
+      bindStu(); fill();
+      $("#sq", el).oninput = e => { sq = e.target.value; $("#sl", el).innerHTML = stuList(); bindStu(); fill(); };
+    } else if (tab === "hw") {
+      el.querySelectorAll("[data-hl]").forEach(b => b.onclick = () => { hl = b.dataset.hl; hp = null; home(); });
+      el.querySelectorAll("[data-hp]").forEach(b => b.onclick = () => { hp = b.dataset.hp; home(); });
+      el.querySelectorAll("[data-hb]").forEach(b => b.onclick = () => { if (b.dataset.hb === "list") hl = null; hp = null; home(); });
+      el.querySelectorAll("[data-sv]").forEach(b => b.onclick = () => {
+        const s = subsAll.find(x => x.id === b.dataset.sv); if (!s) return;
+        const p = lects.flatMap(l => l.parts).find(x => x.id === s.partId);
+        hwSubView(el, nameMap()[s.studentUid] || "طالب", p ? p.title : "واجب", s, home);
+      });
     } else if (tab === "gr") {
-      el.querySelectorAll("[data-gs]").forEach(b => b.onclick = () => {
-        const s = subsAll.find(x => x.id === b.dataset.gs), f = lects.flatMap(l => l.parts.map(q => ({l, q}))).find(x => x.q.id === s.partId);
-        if (f) hwBuilder(el, uid, f.l, f.q, () => loadSubs().then(home), s.id);
+      const g = $("[data-gref]", el); if (g) g.onclick = () => { gr = null; grErr = false; home(); loadGr().then(home); };
+      el.querySelectorAll("[data-gp]").forEach(b => b.onclick = () => {
+        const a = gr.atts.find(x => x.id === b.dataset.gp), e = a && gr.exams.find(x => x.id === a.examId);
+        if (e) examResults(el, uid, {id: e.id, title: e.title}, backGr, a.id);
+      });
+      el.querySelectorAll("[data-ge]").forEach(b => b.onclick = () => {
+        const e = gr.exams.find(x => x.id === b.dataset.ge);
+        if (e) examResults(el, uid, {id: e.id, title: e.title}, backGr);
       });
     } else {
       const nl = $("#nl", el); if (nl) nl.onclick = () => { addOpen = true; home(); };
@@ -101,13 +205,54 @@ export async function renderTeacher(el, uid, d){
     }
   }
 
+  /* ---------- تفاصيل الطالب ---------- */
+  async function student(x){
+    if (!x) return;
+    const u = x.studentUid;
+    el.innerHTML = '<p class="muted center">جاري التحميل…</p>';
+    const mine = c => getDocs(query(collection(db, c), where("teacherUid", "==", uid), where("studentUid", "==", u)));
+    const sf = p => p.catch(() => null);
+    const [p, g, s, P, S, A] = await Promise.all([sf(getDoc(doc(db, "private", u))), sf(getDoc(doc(db, "users", u))), sf(getDoc(doc(db, "sessions", u))), sf(mine("progress")), sf(mine("subs")), sf(mine("attempts"))]);
+    const pv = p && p.exists() ? p.data() : {}, us = g && g.exists() ? g.data() : {}, ss = s && s.exists() ? s.data() : null;
+    const pr = {}, sb = {}, at = {};
+    if (P) P.docs.forEach(z => { pr[z.data().partId] = z.data(); });
+    if (S) S.docs.forEach(z => { sb[z.data().partId] = {id: z.id, ...z.data()}; });
+    if (A) A.docs.forEach(z => { at[z.data().examId] = z.data(); });
+    const created = tms(us.createdAt), seen = ss ? tms(ss.at) : 0;
+    const dn = pt => pt.type === "explain" ? !!(pr[pt.id] && pr[pt.id].done !== false) : pt.type === "homework" ? !!sb[pt.id] : !!(at[pt.id] && at[pt.id].submitted);
+    const all = lects.flatMap(l => l.parts), fin = all.filter(dn).length;
+    const status = pt => {
+      if (!P && pt.type === "explain" || !S && pt.type === "homework" || !A && pt.type === "exam") return "—";
+      if (pt.type === "explain") { const z = pr[pt.id]; return z && z.done !== false ? '<span class="okm">✓ خلّص</span>' : z && z.pct > 0 ? "شاهد " + z.pct + "%" : "لسه ما بدأش"; }
+      if (pt.type === "homework") return sb[pt.id] ? '<span class="okm">✓ سلّم</span>' : "لسه ما سلّمش";
+      const a = at[pt.id]; if (!a) return "لسه ما دخلش";
+      return (a.submitted ? '<span class="okm">✓ سلّم</span>' : "لسه بيحل") + (a.released && a.result ? " · " + a.result.score + " من " + a.result.total : "");
+    };
+    const sub = pt => {
+      if (pt.type === "homework" && sb[pt.id] && tms(sb[pt.id].createdAt)) return `<small>${fullFmt(tms(sb[pt.id].createdAt))}</small>`;
+      const a = pt.type === "exam" && at[pt.id]; if (!a) return "";
+      const xs = exOut(a);
+      return `<small>خروج من الصفحة: ${xs.length} مرة${xs.length ? " · " + xs.reduce((t, z) => t + z.d, 0) + " ث" : ""}</small>`;
+    };
+    el.innerHTML = `<div class="card"><button id="bk" class="lnk" type="button">${ic("back", 18)} رجوع</button><h2 class="h" style="margin-top:10px">${esc(x.studentName)}</h2>
+<div class="item"><small>رقم الطالب</small>${p && p.exists() ? tel(pv.phone) : "—"}</div>
+<div class="item"><small>رقم ولي الأمر</small>${p && p.exists() ? tel(pv.parentPhone) : "—"}</div>
+${p ? "" : '<p class="err small">تعذّر تحميل الأرقام. تأكد إنك نشرت قواعد Firestore الجديدة.</p>'}
+<div class="item"><small>أول تسجيل</small>${created ? esc(fullFmt(created)) : "—"}</div>
+<div class="item"><small>آخر ظهور</small>${ss ? esc(fullFmt(seen)) + " (" + ago(seen) + ")" : s ? "لسه ما ظهرش" : "—"}</div>
+<div class="item"><small>التقدم</small>خلّص ${fin} من ${all.length} جزء</div></div>
+${lects.map(l => `<div class="card" style="margin-top:14px"><b>${esc(l.title)}</b>${l.hidden ? ' <small class="muted">مخفية</small>' : ""}${l.parts.length ? l.parts.map(pt => `<div class="item lrow"><span class="ic">${ic(TYPES[pt.type][1])}</span><div class="lt"><b>${esc(pt.title)}</b><small>${TYPES[pt.type][0]}</small>${sub(pt)}</div><span>${status(pt)}</span>${pt.type === "homework" && sb[pt.id] ? `<button class="btn s sm" type="button" data-sv="${pt.id}">فتح</button>` : ""}</div>`).join("") : '<p class="muted small">مفيش أجزاء.</p>'}</div>`).join("")}`;
+    $("#bk", el).onclick = home;
+    el.querySelectorAll("[data-sv]").forEach(b => b.onclick = () => { const pt = all.find(z => z.id === b.dataset.sv); hwSubView(el, x.studentName, pt ? pt.title : "واجب", sb[b.dataset.sv], () => student(x)); });
+  }
+
   function lecture(l){
     cur = l;
     el.innerHTML = `<div class="card"><button id="bk" class="lnk" type="button">${ic("back", 18)} رجوع للمحاضرات</button><div class="addrow" style="margin-top:12px"><input id="lt" value="${esc(l.title)}" aria-label="اسم المحاضرة"><button id="sv" class="btn s sm" type="button">حفظ الاسم</button></div><label class="lb">طريقة فتح الأجزاء للطالب</label><div class="roles">${[["ordered", "بالترتيب"], ["open", "مفتوحة"]].map(([k, t]) => `<button type="button" data-m="${k}" class="${l.mode === k ? "on" : ""}"><span>${t}</span></button>`).join("")}</div><p class="muted small">${l.mode === "open" ? "كل الأجزاء ظاهرة للطالب من الأول." : "الطالب يخلّص الجزء اللي قبله عشان يفتح اللي بعده."}</p>${l.mode === "ordered" ? '<button id="all" class="btn s sm" type="button">افتح الكل للطلاب</button>' : ""}</div>
 <div class="card" style="margin-top:14px"><h2 class="h">الأجزاء (${l.parts.length})</h2><div class="addrow"><input id="pt" placeholder="عنوان الجزء (اختياري)" aria-label="عنوان الجزء"></div><div class="roles three">${Object.entries(TYPES).map(([k, [t, i]]) => `<button type="button" data-add="${k}">${ic(i, 22)}<span>+ ${t}</span></button>`).join("")}</div><div id="ps">${l.parts.length ? l.parts.map((p, i) => `<div class="item"><div class="lrow"><span class="ic">${ic(TYPES[p.type][1])}</span><div class="lt"><b>${esc(p.title)}</b><small>${TYPES[p.type][0]}${p.type === "explain" ? " · " + mc(p) : p.type === "homework" ? " · " + hc(p.id) : ""}</small></div>${p.type === "exam" ? `<button class="btn s sm" type="button" data-ex="${i}">إعداد</button>` : p.type === "homework" ? `<button class="btn s sm" type="button" data-hwb="${i}">إعداد</button>` : `<button class="btn s sm" type="button" data-cb="${i}">المحتوى</button>`}<button class="ab mn" type="button" data-pm="${p.id}" aria-label="خيارات">⋯</button></div>${pm === p.id ? `<div class="macts">${i > 0 ? `<button class="btn s sm" type="button" data-act="pu" data-id="${i}">↑ لفوق</button>` : ""}${i < l.parts.length - 1 ? `<button class="btn s sm" type="button" data-act="pd" data-id="${i}">↓ لتحت</button>` : ""}<button class="btn s sm bad" type="button" data-act="px" data-id="${i}">مسح</button></div>` : ""}</div>`).join("") : '<p class="muted center">أضف أجزاء المحاضرة من الأزرار فوق.</p>'}</div></div>`;
     $("#bk", el).onclick = home;
     el.querySelectorAll("[data-ex]").forEach(b => b.onclick = () => examBuilder(el, uid, l, l.parts[+b.dataset.ex], () => lecture(l)));
-    el.querySelectorAll("[data-hwb]").forEach(b => b.onclick = () => hwBuilder(el, uid, l, l.parts[+b.dataset.hwb], () => loadSubs().then(() => lecture(l))));
+    el.querySelectorAll("[data-hwb]").forEach(b => b.onclick = () => hwBuilder(el, uid, l, l.parts[+b.dataset.hwb], () => lecture(l)));
     el.querySelectorAll("[data-cb]").forEach(b => b.onclick = () => content(l, +b.dataset.cb));
     $("#sv", el).onclick = () => run(async () => { const t = $("#lt", el).value.trim(); if (!t) return toast("اكتب الاسم"); await save(l, {title: t}); }, "تم الحفظ");
     el.querySelectorAll("[data-m]").forEach(b => b.onclick = () => run(async () => { await save(l, {mode: b.dataset.m}); lecture(l); }));

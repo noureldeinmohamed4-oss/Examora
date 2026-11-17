@@ -81,7 +81,7 @@ export function renderAdmin(el){
     const view = {
       lec: () => lects.length ? lects.map(l => `<div class="item"><b>${esc(l.title)}</b>${l.hidden ? " <small class='muted'>مخفية</small>" : ""}${l.parts.length ? l.parts.map(p => `<small>${TN[p.type]} · ${esc(p.title)}</small>`).join("") : "<small>مفيش أجزاء</small>"}</div>`).join("") : '<p class="muted center">مفيش محاضرات</p>',
       exm: () => exams.length ? exams.map(e => { const a = atts.filter(x => x.examId === e.id); return `<div class="item lrow"><div class="lt"><b>${esc(e.title)}</b><small>${e.published ? "منشور" : "مسودة"} · ${e.questions.length} سؤال · ينتهي ${fm(e.end)}</small><small>دخل ${a.length} · سلّم ${a.filter(x => x.submitted).length}</small></div><button class="btn s sm" type="button" data-e="${e.id}">الدرجات</button></div>`; }).join("") : '<p class="muted center">مفيش امتحانات</p>',
-      hw: () => hws.length ? hws.map(h => { const s = subs.filter(x => x.partId === h.id); return `<div class="item lrow"><div class="lt"><b>${esc(h.title)}</b><small>تسليمات ${s.length} · اتصحح ${s.filter(x => x.graded).length}</small></div><button class="btn s sm" type="button" data-h="${h.id}">الدرجات</button></div>`; }).join("") : '<p class="muted center">مفيش واجبات</p>',
+      hw: () => hws.length ? hws.map(h => { const s = subs.filter(x => x.partId === h.id); return `<div class="item lrow"><div class="lt"><b>${esc(h.title)}</b><small>تسليمات ${s.length}</small></div><button class="btn s sm" type="button" data-h="${h.id}">التسليمات</button></div>`; }).join("") : '<p class="muted center">مفيش واجبات</p>',
       stu: () => links.length ? links.map(l => `<div class="item"><b>${esc(l.studentName)}</b><small>${l.status === "suspended" ? "موقوف" : "نشط"}</small></div>`).join("") : '<p class="muted center">مفيش طلاب</p>'
     };
     body.innerHTML = `<div class="card">${back("bk", "رجوع للمدرسين")}<h2 class="h" style="margin-top:10px">${esc(t.name)} · ${esc(t.subject)}</h2><div class="tabs" id="st">${SUB.map(([k,x]) => `<button type="button" data-k="${k}" class="${k===tab?"on":""}">${x}</button>`).join("")}</div>${view[tab]()}</div>`;
@@ -106,7 +106,7 @@ export function renderAdmin(el){
   }
 
   function hwGrades(h, subs, names, bk){
-    body.innerHTML = `<div class="card">${back("bk")}<h2 class="h" style="margin-top:10px">${esc(h.title)}</h2><p class="muted small">الدرجة الكاملة ${h.max}</p></div><div class="card" style="margin-top:14px;overflow-x:auto"><table class="tbl"><tr><th>الاسم</th><th>الدرجة</th></tr>${subs.map(s => `<tr><td>${esc(names[s.studentUid] || "طالب")}</td><td>${s.graded ? s.grade + " / " + h.max : "لسه ما اتصححش"}</td></tr>`).join("") || '<tr><td colspan="2" class="muted center">لسه ما حدش سلّم.</td></tr>'}</table></div>`;
+    body.innerHTML = `<div class="card">${back("bk")}<h2 class="h" style="margin-top:10px">${esc(h.title)}</h2><p class="muted small">التسليمات: ${subs.length}</p></div><div class="card" style="margin-top:14px;overflow-x:auto"><table class="tbl"><tr><th>الاسم</th><th>وقت التسليم</th></tr>${subs.map(s => `<tr><td>${esc(names[s.studentUid] || "طالب")}</td><td>${s.createdAt && s.createdAt.toMillis ? fm(s.createdAt.toMillis()) : "—"}</td></tr>`).join("") || '<tr><td colspan="2" class="muted center">لسه ما حدش سلّم.</td></tr>'}</table></div>`;
     $("#bk", body).onclick = bk;
   }
 
