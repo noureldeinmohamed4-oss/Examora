@@ -7,6 +7,7 @@ import {isCl, urlImgs} from "./media.js";
 
 const TYPES = {explain: ["شرح", "vid"], homework: ["واجب", "doc"], exam: ["امتحان", "exam"]};
 const fm = ms => new Date(ms).toLocaleString("ar-EG", {dateStyle: "medium", timeStyle: "short"});
+const gnm = g => g.grade === "غير محدد" ? (g.label || "") : g.grade + (g.label ? " · " + g.label : "");
 const safe = u => /^https?:\/\//.test(u || "") ? esc(u) : "";
 
 const merge = r => { r.sort((a, b) => a[0] - b[0]); const o = []; for (const x of r) { const l = o[o.length - 1]; if (l && x[0] <= l[1] + 0.05) l[1] = Math.max(l[1], x[1]); else o.push([x[0], x[1]]); } return o; };
@@ -56,6 +57,7 @@ export async function renderStudent(el, uid, d){
   const load = async () => {
     const s = await getDocs(query(collection(db, "links"), where("studentUid", "==", uid)));
     links = s.docs.map(x => ({id: x.id, ...x.data()}));
+    await Promise.all(links.map(async l => { l.groupName = ""; if (!l.groupId) return; try { const g = await getDoc(doc(db, "groups", l.groupId)); if (g.exists()) l.groupName = gnm(g.data()); } catch (e) {} }));
   };
   const addCode = async raw => {
     const c = String(raw).toUpperCase().replace(/[^A-Z0-9]/g, "");
@@ -63,11 +65,11 @@ export async function renderStudent(el, uid, d){
     const s = await getDoc(doc(db, "codes", c));
     if (!s.exists()) return toast("كود المدرس غير صحيح");
     const t = s.data(), id = t.teacherUid + "_" + uid, ex = links.find(l => l.id === id);
+    if (!t.groupId) return toast("الكود ده لسه بيتجهّز، اطلب من المدرس يفتح صفحته الأول");
     if (ex && ex.status === "suspended") return toast("مش متاح إضافة المدرس ده، تواصل معاه");
-    if (ex && ex.code === c) return toast("المدرس ده مضاف بالفعل");
-    if (!confirm(`إضافة ${t.name} (${t.subject})؟`)) return;
-    if (ex) await updateDoc(doc(db, "links", id), {code: c});
-    else await setDoc(doc(db, "links", id), {teacherUid: t.teacherUid, studentUid: uid, studentName: d.name, teacherName: t.name, subject: t.subject, code: c, status: "active", createdAt: serverTimestamp()});
+    if (ex) return toast(ex.groupId === t.groupId ? "إنت مسجّل في المجموعة دي بالفعل" : "إنت مسجّل عند المدرس ده في مجموعة تانية، اطلب منه ينقلك");
+    if (!confirm(`إضافة ${t.name} (${t.subject})${t.groupName ? " - " + t.groupName : ""}؟`)) return;
+    await setDoc(doc(db, "links", id), {teacherUid: t.teacherUid, studentUid: uid, studentName: d.name, teacherName: t.name, subject: t.subject, code: c, groupId: t.groupId, status: "active", createdAt: serverTimestamp()});
     toast("تمت الإضافة");
     await load();
     return true;
@@ -75,7 +77,7 @@ export async function renderStudent(el, uid, d){
   const addBox = () => `<div class="addrow"><input id="cd" placeholder="كود المدرس" aria-label="كود المدرس" autocapitalize="characters" autocomplete="off"><button id="ad" class="btn p sm" type="button">إضافة</button></div>`;
 
   function home(){
-    el.innerHTML = `<div class="card stu"><b>أهلاً ${esc(d.name.split(" ")[0])}</b><small class="muted" style="display:block">طالب</small></div><div class="card" style="margin-top:14px"><h2 class="h">مدرسيني (${links.length})</h2>${addBox()}<div id="ls">${links.length ? links.map(l => `<div class="item lrow"><div class="lt" data-act="open" data-id="${l.id}"><b>${esc(l.teacherName)}</b><small>${esc(l.subject)}${l.status === "suspended" ? " · موقوف" : ""}</small></div>${l.status === "active" ? `<button class="ab" type="button" data-act="rm" data-id="${l.id}" aria-label="شيل المدرس">${ic("trash", 18)}</button>` : ""}</div>`).join("") : '<p class="muted center">ضيف كود مدرسك عشان تشوف محاضراته.</p>'}</div></div>`;
+    el.innerHTML = `<div class="card stu"><b>أهلاً ${esc(d.name.split(" ")[0])}</b><small class="muted" style="display:block">طالب</small></div><div class="card" style="margin-top:14px"><h2 class="h">مدرسيني (${links.length})</h2>${addBox()}<div id="ls">${links.length ? links.map(l => `<div class="item lrow"><div class="lt" data-act="open" data-id="${l.id}"><b>${esc(l.teacherName)}</b><small>${esc(l.subject)}${l.groupName ? " · " + esc(l.groupName) : ""}${l.status === "suspended" ? " · موقوف" : ""}</small></div>${l.status === "active" ? `<button class="ab" type="button" data-act="rm" data-id="${l.id}" aria-label="شيل المدرس">${ic("trash", 18)}</button>` : ""}</div>`).join("") : '<p class="muted center">ضيف كود مدرسك عشان تشوف محاضراته.</p>'}</div></div>`;
     $("#ad", el).onclick = () => run(async () => { if (await addCode($("#cd", el).value)) home(); });
     el.querySelectorAll("#ls [data-act]").forEach(b => b.onclick = () => run(async () => {
       const l = links.find(x => x.id === b.dataset.id);
@@ -88,15 +90,12 @@ export async function renderStudent(el, uid, d){
   async function teacher(l){
     el.innerHTML = '<p class="muted center">جاري التحميل…</p>';
     let lects;
+    const fail = m => { el.innerHTML = `<div class="card"><button id="bk" class="lnk" type="button">${ic("back", 18)} رجوع</button><p class="err">${m}</p></div>`; $("#bk", el).onclick = home; };
+    if (!l.groupId) return fail("المدرس لسه بيجهّز مجموعتك. حاول تاني بعد شوية.");
     try {
-      const s = await getDocs(query(collection(db, "lectures"), where("teacherUid", "==", l.teacherUid), where("hidden", "==", false)));
+      const s = await getDocs(query(collection(db, "lectures"), where("teacherUid", "==", l.teacherUid), where("groupId", "==", l.groupId), where("hidden", "==", false)));
       lects = s.docs.map(x => ({id: x.id, ...x.data()})).sort((a, b) => a.order - b.order);
-    } catch (e) {
-      el.innerHTML = `<div class="card"><button id="bk" class="lnk" type="button">${ic("back", 18)} رجوع</button><p class="err">كود المدرس اتغيّر. اكتب الكود الجديد عشان ترجع.</p>${addBox()}</div>`;
-      $("#bk", el).onclick = home;
-      $("#ad", el).onclick = () => run(async () => { if (await addCode($("#cd", el).value)) teacher(l); });
-      return;
-    }
+    } catch (e) { return fail("تعذّر تحميل المحاضرات. ممكن المدرس يكون نقلك أو مسح المجموعة، أو اتأكد من الإنترنت."); }
     const g = (c, ...w) => getDocs(query(collection(db, c), ...w)).then(s => s.docs).catch(() => []);
     const [E, H, A, S, P] = await Promise.all([
       g("exams", where("teacherUid", "==", l.teacherUid), where("published", "==", true)),
@@ -131,7 +130,7 @@ export async function renderStudent(el, uid, d){
       return (e.materials || []).map(m => safe(m.url) ? `<a class="lnk" style="display:block;margin-top:6px" href="${safe(m.url)}" target="_blank" rel="noopener">${esc(m.title)}</a>` : "").join("") + `<button class="btn s sm" type="button" data-rv="${p.id}" style="margin-top:8px">ورقتي${e.reviewUntil > Date.now() ? " وطلب مراجعة" : ""}</button>`;
     };
     const row = (p, lk) => `<div class="item${lk ? " lk" : ""}"><div class="lrow"><span class="ic">${ic(lk ? "lock" : TYPES[p.type][1])}</span><div class="lt"><b>${esc(p.title)}</b><small>${TYPES[p.type][0]}${lk ? " · يفتح بعد اللي قبله" : p.type === "exam" && exs[p.id] ? ` · ${exs[p.id].duration} دقيقة` : ""}</small></div>${lk ? "" : act(p)}</div>${lk ? "" : extra(p)}</div>`;
-    el.innerHTML = `<div class="card"><button id="bk" class="lnk" type="button">${ic("back", 18)} رجوع</button><h2 class="h" style="margin-top:10px">${esc(l.teacherName)} · ${esc(l.subject)}</h2></div>${lects.length ? lects.map(x => `<div class="card" style="margin-top:14px"><b>${esc(x.title)}</b>${x.parts.length ? x.parts.map((p, i) => row(p, x.mode !== "open" && i > 0 && !done(x.parts[i - 1]))).join("") : '<p class="muted small">لسه مفيش أجزاء.</p>'}</div>`).join("") : '<div class="card" style="margin-top:14px"><p class="muted center">المدرس لسه ما أضافش محاضرات.</p></div>'}`;
+    el.innerHTML = `<div class="card"><button id="bk" class="lnk" type="button">${ic("back", 18)} رجوع</button><h2 class="h" style="margin-top:10px">${esc(l.teacherName)} · ${esc(l.subject)}</h2>${l.groupName ? `<p class="muted small">${esc(l.groupName)}</p>` : ""}</div>${lects.length ? lects.map(x => `<div class="card" style="margin-top:14px"><b>${esc(x.title)}</b>${x.parts.length ? x.parts.map((p, i) => row(p, x.mode !== "open" && i > 0 && !done(x.parts[i - 1]))).join("") : '<p class="muted small">لسه مفيش أجزاء.</p>'}</div>`).join("") : '<div class="card" style="margin-top:14px"><p class="muted center">المدرس لسه ما أضافش محاضرات.</p></div>'}`;
     $("#bk", el).onclick = home;
     const back = () => teacher(l);
     const explain = p => {

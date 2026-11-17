@@ -33,7 +33,7 @@ async function route(u){
   if (d.status === "pending") { app.innerHTML = '<div class="pending">الحساب قيد المراجعة</div>'; pt = setTimeout(() => route(auth.currentUser), 30000); }
   else if (d.status === "suspended") app.innerHTML = '<div class="pending off">الحساب موقوف</div>';
   else if (d.role === "student") { if (!$(".stu", app)) renderStudent(app, u.uid, d); }
-  else if (d.role === "teacher") { if (!$(".codebox", app)) renderTeacher(app, u.uid, d); }
+  else if (d.role === "teacher") { if (!$(".tch", app)) renderTeacher(app, u.uid, d); }
   else app.innerHTML = `<div class="card center"><h2 class="h">أهلاً ${esc(d.name.split(" ")[0])}</h2><p class="muted">${d.role === "teacher" ? "مدرس · " + esc(d.subject) : "طالب"}</p>${d.role === "teacher" ? `<p>كودك<br><b class="code" dir="ltr">${esc(d.code)}</b></p>` : ""}<p class="muted">المحاضرات والامتحانات قريباً</p></div>`;
 }
 onAuthStateChanged(auth, route);

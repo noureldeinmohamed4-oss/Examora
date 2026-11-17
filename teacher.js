@@ -1,5 +1,5 @@
 import {db} from "./firebase.js";
-import {collection, query, where, getDocs, getDoc, doc, addDoc, updateDoc, deleteDoc, writeBatch, serverTimestamp} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import {collection, query, where, getDocs, getDoc, doc, addDoc, setDoc, updateDoc, deleteDoc, writeBatch, serverTimestamp} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {$, esc, toast, ic} from "./ui.js";
 import {examBuilder} from "./exam.js";
 import {hwBuilder, hwSubView} from "./homework.js";
@@ -7,6 +7,9 @@ import {examResults} from "./results.js";
 import {pickUpload, upMsg} from "./media.js";
 
 const TYPES = {explain: ["شرح", "vid"], homework: ["واجب", "doc"], exam: ["امتحان", "exam"]};
+const GRADES = ["الصف الأول الابتدائي", "الصف الثاني الابتدائي", "الصف الثالث الابتدائي", "الصف الرابع الابتدائي", "الصف الخامس الابتدائي", "الصف السادس الابتدائي", "الصف الأول الإعدادي", "الصف الثاني الإعدادي", "الصف الثالث الإعدادي", "الصف الأول الثانوي", "الصف الثاني الثانوي", "الصف الثالث الثانوي"];
+const LEGACY = "غير محدد", MAXG = 10;
+const gname = g => g.grade === LEGACY ? (g.label || "") : g.grade + (g.label ? " · " + g.label : "");
 const CH = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const genCode = () => Array.from(crypto.getRandomValues(new Uint8Array(6)), n => CH[n % 32]).join("");
 
@@ -28,13 +31,34 @@ const tel = n => n ? `<a href="tel:${esc(n)}" dir="ltr">${esc(n)}</a>` : "—";
 const exOut = a => (a.exits || []).filter(x => !(x.p && x.d <= 90));
 
 export async function renderTeacher(el, uid, d){
-  let lects = [], stu = [], cur = null, code = d.code, subsAll = [], subsErr = false, tab = "lec", addOpen = false, menu = null, pm = null, sq = "", showAll = false;
+  let lects = [], stu = [], cur = null, groups = [], gsel = null, gform = false, gmenu = false, gmsg = "", subsAll = [], subsErr = false, tab = "lec", addOpen = false, menu = null, pm = null, sq = "", showAll = false;
   let info = {}, gr = null, grErr = false, grBusy = false, hl = null, hp = null;
   const loadSubs = async () => { try { subsAll = (await getDocs(query(collection(db, "subs"), where("teacherUid", "==", uid)))).docs.map(x => ({id: x.id, ...x.data()})); subsErr = false; } catch (e) { subsErr = true; } };
   const hc = id => { const n = subsAll.filter(s => s.partId === id).length; return n ? n + " تسليم" : "لسه ما حدش سلّم"; };
-  const load = async () => {
+  const curG = () => groups.find(g => g.id === gsel);
+  const loadLects = async () => {
     const s = await getDocs(query(collection(db, "lectures"), where("teacherUid", "==", uid)));
-    lects = s.docs.map(x => ({id: x.id, ...x.data()})).sort((a, b) => a.order - b.order);
+    lects = s.docs.map(x => ({id: x.id, ...x.data()})).filter(l => l.groupId === gsel).sort((a, b) => a.order - b.order);
+  };
+  async function migrate(){
+    let g = groups.find(x => x.code === d.code);
+    if (!g) {
+      const ref = doc(collection(db, "groups")), data = {teacherUid: uid, grade: LEGACY, label: "المجموعة الأساسية", code: d.code, createdAt: serverTimestamp()};
+      await setDoc(ref, data);
+      g = {id: ref.id, ...data}; groups.push(g);
+    }
+    const [L, K] = await Promise.all([getDocs(query(collection(db, "lectures"), where("teacherUid", "==", uid))), getDocs(query(collection(db, "links"), where("teacherUid", "==", uid)))]);
+    const todo = [...L.docs, ...K.docs].filter(x => !x.data().groupId);
+    for (let i = 0; i < todo.length; i += 400) { const b = writeBatch(db); todo.slice(i, i + 400).forEach(x => b.update(x.ref, {groupId: g.id})); await b.commit(); }
+    try { await updateDoc(doc(db, "codes", d.code), {groupId: g.id, groupName: gname(g)}); }
+    catch (e) { await setDoc(doc(db, "codes", d.code), {teacherUid: uid, groupId: g.id, groupName: gname(g), name: d.name, subject: d.subject}); }
+    await updateDoc(doc(db, "users", uid), {code: ""}); d.code = "";
+  }
+  const load = async () => {
+    groups = (await getDocs(query(collection(db, "groups"), where("teacherUid", "==", uid)))).docs.map(x => ({id: x.id, ...x.data()})).sort((a, b) => tms(a.createdAt) - tms(b.createdAt));
+    if (d.code) await migrate();
+    if (!groups.some(g => g.id === gsel)) gsel = groups.length ? groups[0].id : null;
+    await loadLects();
     const s2 = await getDocs(query(collection(db, "links"), where("teacherUid", "==", uid)));
     stu = s2.docs.map(x => ({id: x.id, ...x.data()}));
     await loadSubs();
@@ -50,7 +74,7 @@ export async function renderTeacher(el, uid, d){
     grBusy = false;
   };
   const grData = () => {
-    const byEx = {}; gr.exams.forEach(e => { byEx[e.id] = e; });
+    const lid = new Set(lects.map(l => l.id)), gx = gr.exams.filter(e => lid.has(e.lectureId)), byEx = {}; gx.forEach(e => { byEx[e.id] = e; });
     const pend = [], rv = {}, cnt = {};
     gr.atts.forEach(a => {
       const e = byEx[a.examId]; if (!e) return;
@@ -60,14 +84,14 @@ export async function renderTeacher(el, uid, d){
       const n = Object.keys(a.reviews || {}).length; if (n) rv[e.id] = (rv[e.id] || 0) + n;
     });
     pend.sort((x, y) => tms(y.a.submittedAt) - tms(x.a.submittedAt));
-    return {pend, rv, cnt, exams: [...gr.exams].sort((x, y) => (y.start || 0) - (x.start || 0))};
+    return {pend, rv, cnt, exams: [...gx].sort((x, y) => (y.start || 0) - (x.start || 0))};
   };
   const backGr = () => { gr = null; home(); loadGr().then(home); };
 
   /* ---------- الطلاب ---------- */
   const stuAll = () => {
     const k = sq.trim().toLowerCase();
-    return stu.filter(x => x.code === code && (!k || String(x.studentName || "").toLowerCase().includes(k))).sort((x, y) => String(x.studentName || "").localeCompare(String(y.studentName || ""), "ar"));
+    return stu.filter(x => x.groupId === gsel && (!k || String(x.studentName || "").toLowerCase().includes(k))).sort((x, y) => String(x.studentName || "").localeCompare(String(y.studentName || ""), "ar"));
   };
   const stuShown = () => { const all = stuAll(); return {all, sh: sq.trim() || showAll ? all : all.slice(0, 10)}; };
   const seenTxt = x => {
@@ -107,7 +131,7 @@ export async function renderTeacher(el, uid, d){
   /* ---------- الواجبات ---------- */
   const hwTab = () => {
     if (subsErr) return '<p class="err center small">تعذّر تحميل التسليمات. تأكد من الإنترنت وقواعد Firestore.</p>';
-    const act = stu.filter(x => x.code === code);
+    const act = stu.filter(x => x.groupId === gsel);
     const bk = k => `<button class="lnk" type="button" data-hb="${k}">${ic("back", 18)} رجوع</button>`;
     const L = lects.find(x => x.id === hl), P = L && L.parts.find(p => p.id === hp && p.type === "homework");
     if (L && P) {
@@ -140,28 +164,122 @@ export async function renderTeacher(el, uid, d){
   const save = async (l, patch) => { await updateDoc(doc(db, "lectures", l.id), patch); Object.assign(l, patch); };
   const swap = (arr, i, j) => { if (j < 0 || j >= arr.length) return false; [arr[i], arr[j]] = [arr[j], arr[i]]; return true; };
 
+  /* ---------- المجموعات ---------- */
+  const freshCode = async () => { for (let i = 0; i < 5; i++) { const c = genCode(); if (!(await getDoc(doc(db, "codes", c))).exists()) return c; } return null; };
+  const codeDoc = g => ({teacherUid: uid, groupId: g.id, groupName: gname(g), name: d.name, subject: d.subject});
+  const dupGroup = (grade, label, skip) => groups.some(g => g.id !== skip && g.grade === grade && String(g.label || "").trim().toLowerCase() === label.trim().toLowerCase());
+  const gForm = (p, g) => `<select id="${p}grade" class="plain" aria-label="الصف"><option value="">اختار الصف</option>${GRADES.map(x => `<option${g && g.grade === x ? " selected" : ""}>${x}</option>`).join("")}</select><input id="${p}label" class="plain" placeholder="وصف اختياري (مثال: مجموعة السبت)" maxlength="40" value="${esc(g ? g.label || "" : "")}" style="margin-top:8px" aria-label="وصف المجموعة">`;
+  const codeBox = g => g.code
+    ? `<div class="codebox"><div><small class="muted">كود ${esc(gname(g))}</small><b class="code" dir="ltr">${esc(g.code)}</b></div></div><div class="macts"><button id="cp" class="btn s sm" type="button">نسخ</button><button id="cc" class="btn s sm" type="button">تغيير الكود</button><button id="cx" class="btn s sm bad" type="button">مسح الكود</button></div>`
+    : `<div class="codebox"><div><small class="muted">كود ${esc(gname(g))}</small><b>مقفول</b></div></div><p class="muted small">محدش جديد يقدر ينضم للمجموعة دي لحد ما تعمل كود جديد.</p><div class="macts"><button id="cn" class="btn p sm" type="button">إنشاء كود جديد</button></div>`;
+  const groupCard = () => {
+    const g = curG(), open = gform || !groups.length;
+    return `<div class="card tch"><b>${esc(d.name)}</b><small class="muted" style="display:block">مدرس · ${esc(d.subject)}</small>
+${groups.length ? `<label class="lb">المجموعة (الصف)</label><select id="gs" class="plain" aria-label="المجموعة">${groups.map(x => `<option value="${x.id}"${x.id === gsel ? " selected" : ""}>${esc(gname(x))}</option>`).join("")}</select>` : '<p class="muted small" style="margin-top:12px">اعمل أول مجموعة: اختار الصف وهيتولّد لها كود تبعته للطلاب.</p>'}
+<div class="acts"><button id="gn" class="btn s sm" type="button">+ مجموعة جديدة</button>${g ? '<button id="gm" class="btn s sm" type="button">⋯ إدارة المجموعة</button>' : ""}</div>
+${open ? `<div style="margin-top:10px">${gForm("new")}<div class="acts"><button id="gc" class="btn p sm" type="button">إنشاء</button>${groups.length ? '<button id="gx" class="btn s sm" type="button">إلغاء</button>' : ""}</div></div>` : ""}
+${g ? codeBox(g) : ""}
+${g && gmenu ? `<div class="item" style="margin-top:10px"><b>تعديل اسم المجموعة</b>${gForm("edit", g)}<button id="gsave" class="btn s sm" type="button" style="margin-top:8px">حفظ</button></div><div class="item"><b class="badm">منطقة خطرة</b><p class="muted small">مسح المجموعة بيمسح محاضراتها وامتحاناتها وواجباتها وتسليمات وإجابات طلابها نهائيًا، ومينفعش يتراجع عنه.</p><button id="gdel" class="btn s sm bad" type="button">مسح المجموعة نهائيًا</button></div>` : ""}
+<p id="gmsg" class="err" role="alert">${esc(gmsg)}</p></div>`;
+  };
+  async function createGroup(grade, label){
+    label = label.trim().slice(0, 40);
+    if (!GRADES.includes(grade)) return "اختار الصف الأول";
+    if (groups.length >= MAXG) return "وصلت للحد الأقصى (" + MAXG + " مجموعات)";
+    if (dupGroup(grade, label, null)) return "المجموعة دي موجودة بالفعل";
+    const c = await freshCode(); if (!c) return "حصل خطأ، حاول تاني";
+    const ref = doc(collection(db, "groups"));
+    await setDoc(ref, {teacherUid: uid, grade, label, code: c, createdAt: serverTimestamp()});
+    await setDoc(doc(db, "codes", c), codeDoc({id: ref.id, grade, label}));
+    gsel = ref.id; gform = false; gmenu = false; gmsg = ""; hl = hp = null; gr = null; sq = ""; showAll = false; menu = null;
+    await load(); home(); return "";
+  }
+  async function saveGroup(grade, label){
+    const g = curG(); label = label.trim().slice(0, 40);
+    if (!GRADES.includes(grade)) return "اختار الصف";
+    if (dupGroup(grade, label, g.id)) return "المجموعة دي موجودة بالفعل";
+    const b = writeBatch(db);
+    b.update(doc(db, "groups", g.id), {grade, label});
+    if (g.code && (await getDoc(doc(db, "codes", g.code))).exists()) b.update(doc(db, "codes", g.code), {groupName: gname({grade, label})});
+    await b.commit(); Object.assign(g, {grade, label}); gmenu = false; gmsg = ""; home(); return "";
+  }
+  async function setCode(mode){
+    const g = curG();
+    if (mode === "change" && !confirm("الكود القديم هيبطل، والطلاب اللي جوّه المجموعة هيفضلوا زي ما هم. تكمّل؟")) return;
+    if (mode === "remove" && !confirm("مسح الكود هيمنع أي طالب جديد ينضم، والمجموعة وطلابها ومحتواها يفضلوا زي ما هم. تكمّل؟")) return;
+    const old = g.code && (await getDoc(doc(db, "codes", g.code))).exists() ? g.code : "";
+    const c = mode === "remove" ? "" : await freshCode();
+    if (mode !== "remove" && !c) throw 0;
+    const b = writeBatch(db);
+    if (old) b.delete(doc(db, "codes", old));
+    if (c) b.set(doc(db, "codes", c), codeDoc(g));
+    b.update(doc(db, "groups", g.id), {code: c});
+    await b.commit(); g.code = c; gmsg = ""; home();
+  }
+  async function deleteGroup(){
+    const g = curG(), nm = gname(g);
+    el.innerHTML = '<div class="card"><p class="muted center" id="ds">جاري حساب اللي هيتمسح…</p></div>';
+    let refs = [];
+    try {
+      const q = (c, ...w) => getDocs(query(collection(db, c), where("teacherUid", "==", uid), ...w));
+      const keys = [], mid = [], hws = [], exs = [];
+      for (const l of lects) {
+        const [E, H] = await Promise.all([q("exams", where("lectureId", "==", l.id)), q("homeworks", where("lectureId", "==", l.id))]);
+        for (const e of E.docs) { keys.push(doc(db, "exams", e.id, "key", "main")); exs.push(e.ref); (await q("attempts", where("examId", "==", e.id))).docs.forEach(a => mid.push(a.ref)); }
+        for (const h of H.docs) { hws.push(h.ref); (await q("subs", where("partId", "==", h.id))).docs.forEach(a => mid.push(a.ref)); }
+        for (const p of l.parts) if (p.type === "explain") (await q("progress", where("partId", "==", p.id))).docs.forEach(a => mid.push(a.ref));
+      }
+      const lk = (await q("links", where("groupId", "==", g.id))).docs.map(x => x.ref);
+      refs = [...keys, ...mid, ...hws, ...exs, ...lects.map(l => doc(db, "lectures", l.id)), ...lk];
+    } catch (e) { toast("تعذّر حساب البيانات، حاول تاني"); return home(); }
+    const n = refs.length + 2;
+    if (!confirm("هيتمسح " + n + " عنصر (محاضرات وامتحانات وواجبات وتسليمات وإجابات وطلاب)، وده بيستهلك " + n + " من حد الكتابة اليومي (20 ألف). مفيش رجوع. تكمّل؟")) return home();
+    const t = prompt("للتأكيد اكتب اسم المجموعة بالظبط:\n" + nm);
+    if (t == null || t.trim() !== nm) { toast("الاسم مش مطابق، المسح اتلغى"); return home(); }
+    const ds = () => $("#ds", el);
+    try {
+      if (g.code && (await getDoc(doc(db, "codes", g.code))).exists()) await deleteDoc(doc(db, "codes", g.code));
+      for (let i = 0; i < refs.length; i += 400) {
+        const b = writeBatch(db); refs.slice(i, i + 400).forEach(r => b.delete(r)); await b.commit();
+        if (ds()) ds().textContent = "اتمسح " + Math.min(refs.length, i + 400) + " من " + refs.length + "…";
+      }
+      await deleteDoc(doc(db, "groups", g.id));
+    } catch (e) {
+      el.innerHTML = '<div class="card"><p class="err">المسح وقف في النص (غالبًا النت أو حد الكتابة اليومي). اللي اتمسح اتمسح، وتقدر تفتح المجموعة وتكرر المسح.</p><button id="bk" class="btn s full" type="button">رجوع</button></div>';
+      $("#bk", el).onclick = () => load().then(home, home); return;
+    }
+    gsel = null; gmenu = false; gmsg = ""; hl = hp = null; gr = null; menu = null;
+    toast("اتمسحت المجموعة"); await load(); home();
+  }
+  const bindGroup = () => {
+    const on = (id, fn) => { const b = $("#" + id, el); if (b) b.onclick = fn; };
+    const msg = m => { const x = $("#gmsg", el); if (x) x.textContent = m || ""; };
+    const sel = $("#gs", el);
+    if (sel) sel.onchange = () => run(async () => { gsel = sel.value; gmenu = false; gform = false; gmsg = ""; hl = hp = null; sq = ""; showAll = false; gr = null; menu = null; addOpen = false; await loadLects(); home(); });
+    on("gn", () => { gform = !gform; gmenu = false; gmsg = ""; home(); });
+    on("gx", () => { gform = false; gmsg = ""; home(); });
+    on("gm", () => { gmenu = !gmenu; gform = false; gmsg = ""; home(); });
+    on("gc", () => run(async () => msg(await createGroup($("#newgrade", el).value, $("#newlabel", el).value))));
+    on("gsave", () => run(async () => msg(await saveGroup($("#editgrade", el).value, $("#editlabel", el).value))));
+    on("cp", () => navigator.clipboard.writeText(curG().code).then(() => toast("اتنسخ الكود"), () => toast(curG().code)));
+    on("cc", () => run(() => setCode("change"), "تم تغيير الكود"));
+    on("cx", () => run(() => setCode("remove"), "تم مسح الكود"));
+    on("cn", () => run(() => setCode("new"), "تم إنشاء الكود"));
+    on("gdel", () => deleteGroup());
+  };
+
   function home(){
     cur = null;
-    const gd = gr && !grErr ? grData() : null, pend = gd ? gd.pend.length : null, n = stu.filter(x => x.code === code).length;
-    const body = tab === "stu" ? stuTab() : tab === "hw" ? hwTab() : tab === "gr" ? grTab(gd) : lecTab();
+    const gd = gr && !grErr ? grData() : null, pend = gd ? gd.pend.length : null, n = stu.filter(x => x.groupId === gsel).length;
+    const body = !gsel ? '<p class="muted center small">اعمل أول مجموعة عشان تبدأ تضيف محاضرات وتستقبل طلاب.</p>' : tab === "stu" ? stuTab() : tab === "hw" ? hwTab() : tab === "gr" ? grTab(gd) : lecTab();
     const tabs = [["lec", "المحاضرات"], ["stu", "الطلاب"], ["hw", "الواجبات"], ["gr", "التصحيح" + (pend ? " (" + pend + ")" : "")]];
-    el.innerHTML = `<div class="card"><b>${esc(d.name)}</b><small class="muted" style="display:block">مدرس · ${esc(d.subject)}</small><div class="codebox"><div><small class="muted">كودك</small><b class="code" dir="ltr">${esc(code)}</b></div><div class="acts" style="margin:0"><button id="cp" class="btn s sm" type="button">نسخ</button><button id="cc" class="btn s sm" type="button">تغيير</button></div></div></div>
+    el.innerHTML = `${groupCard()}
 <div class="stats"><button class="stat" type="button" data-tb="lec"><b>${lects.length}</b><small>محاضرة</small></button><button class="stat" type="button" data-tb="stu"><b>${n}</b><small>طالب</small></button><button class="stat${pend ? " hot" : ""}" type="button" data-tb="gr"><b>${pend == null ? "—" : pend}</b><small>محتاج تصحيح</small></button></div>
 <div class="tabs" style="margin-top:12px">${tabs.map(([k, t]) => `<button type="button" data-tb="${k}" class="${k === tab ? "on" : ""}">${t}</button>`).join("")}</div>
 <div class="card" style="margin-top:8px">${body}</div>`;
     el.querySelectorAll("[data-tb]").forEach(b => b.onclick = () => { tab = b.dataset.tb; home(); if (tab === "gr" && !gr && !grBusy) loadGr().then(home); });
-    $("#cp", el).onclick = () => navigator.clipboard.writeText(code).then(() => toast("اتنسخ الكود"), () => toast(code));
-    $("#cc", el).onclick = () => run(async () => {
-      if (!confirm("تغيير الكود هيفصل طلابك الحاليين لحد ما يكتبوا الكود الجديد. متأكد؟")) return;
-      let n = null;
-      for (let i = 0; i < 5 && !n; i++) { const c = genCode(); if (!(await getDoc(doc(db, "codes", c))).exists()) n = c; }
-      if (!n) throw 0;
-      const b = writeBatch(db);
-      b.set(doc(db, "codes", n), {teacherUid: uid, name: d.name, subject: d.subject});
-      b.delete(doc(db, "codes", code));
-      b.update(doc(db, "users", uid), {code: n});
-      await b.commit(); code = n; home();
-    }, "تم تغيير الكود");
+    bindGroup();
+    if (!gsel) { el.querySelectorAll(".stats,.tabs").forEach(x => x.remove()); return; }
     if (tab === "stu") {
       bindStu(); fill();
       $("#sq", el).oninput = e => { sq = e.target.value; $("#sl", el).innerHTML = stuList(); bindStu(); fill(); };
@@ -190,7 +308,7 @@ export async function renderTeacher(el, uid, d){
       const nt = $("#nt", el); if (nt) nt.focus();
       const add = $("#add", el); if (add) add.onclick = () => run(async () => {
         const t = $("#nt", el).value.trim(); if (!t) return toast("اكتب اسم المحاضرة");
-        await addDoc(collection(db, "lectures"), {teacherUid: uid, title: t, order: Date.now(), hidden: false, mode: "ordered", parts: [], createdAt: serverTimestamp()});
+        await addDoc(collection(db, "lectures"), {teacherUid: uid, title: t, order: Date.now(), hidden: false, mode: "ordered", parts: [], groupId: gsel, createdAt: serverTimestamp()});
         addOpen = false; await load(); home();
       });
       el.querySelectorAll("[data-mn]").forEach(b => b.onclick = () => { menu = menu === b.dataset.mn ? null : b.dataset.mn; home(); });
@@ -240,9 +358,10 @@ export async function renderTeacher(el, uid, d){
 ${p ? "" : '<p class="err small">تعذّر تحميل الأرقام. تأكد إنك نشرت قواعد Firestore الجديدة.</p>'}
 <div class="item"><small>أول تسجيل</small>${created ? esc(fullFmt(created)) : "—"}</div>
 <div class="item"><small>آخر ظهور</small>${ss ? esc(fullFmt(seen)) + " (" + ago(seen) + ")" : s ? "لسه ما ظهرش" : "—"}</div>
-<div class="item"><small>التقدم</small>خلّص ${fin} من ${all.length} جزء</div></div>
+<div class="item"><small>التقدم</small>خلّص ${fin} من ${all.length} جزء</div>${groups.length > 1 ? `<div class="item"><small>نقل لمجموعة تانية</small><div class="addrow"><select id="mv" class="plain" aria-label="المجموعة">${groups.filter(g => g.id !== gsel).map(g => `<option value="${g.id}">${esc(gname(g))}</option>`).join("")}</select><button id="mb" class="btn s sm" type="button">نقل</button></div></div>` : ""}</div>
 ${lects.map(l => `<div class="card" style="margin-top:14px"><b>${esc(l.title)}</b>${l.hidden ? ' <small class="muted">مخفية</small>' : ""}${l.parts.length ? l.parts.map(pt => `<div class="item lrow"><span class="ic">${ic(TYPES[pt.type][1])}</span><div class="lt"><b>${esc(pt.title)}</b><small>${TYPES[pt.type][0]}</small>${sub(pt)}</div><span>${status(pt)}</span>${pt.type === "homework" && sb[pt.id] ? `<button class="btn s sm" type="button" data-sv="${pt.id}">فتح</button>` : ""}</div>`).join("") : '<p class="muted small">مفيش أجزاء.</p>'}</div>`).join("")}`;
     $("#bk", el).onclick = home;
+    const mb = $("#mb", el); if (mb) mb.onclick = () => run(async () => { const v = $("#mv", el).value, g = groups.find(y => y.id === v); if (!g || !confirm("نقل " + x.studentName + " إلى " + gname(g) + "؟ هيشوف محاضرات المجموعة الجديدة بس.")) return; await updateDoc(doc(db, "links", x.id), {groupId: v}); x.groupId = v; toast("تم النقل"); home(); });
     el.querySelectorAll("[data-sv]").forEach(b => b.onclick = () => { const pt = all.find(z => z.id === b.dataset.sv); hwSubView(el, x.studentName, pt ? pt.title : "واجب", sb[b.dataset.sv], () => student(x)); });
   }
 
@@ -280,7 +399,7 @@ ${lects.map(l => `<div class="card" style="margin-top:14px"><b>${esc(l.title)}</
       try {
         const s = await getDocs(query(collection(db, "progress"), where("teacherUid", "==", uid), where("partId", "==", p.id)));
         const pr = {}; s.docs.forEach(x => { pr[x.data().studentUid] = x.data(); });
-        const a = stu.filter(x => x.code === code && x.status !== "suspended");
+        const a = stu.filter(x => x.groupId === l.groupId && x.status !== "suspended");
         if (!$("#mn", el)) return;
         $("#mn", el).innerHTML = a.length ? a.map(x => { const g = pr[x.studentUid], dn = g && g.done !== false; return `<div class="item lrow"><div class="lt"><b>${esc(x.studentName)}</b></div><span class="${dn ? "" : "muted"}">${dn ? "✓ خلّص" : g && g.pct > 0 ? "شاهد " + g.pct + "%" : "لسه ما بدأش"}</span></div>`; }).join("") : '<p class="muted center">لسه مفيش طلاب.</p>';
       } catch (e) { if ($("#mn", el)) $("#mn", el).innerHTML = '<p class="err center">تعذّر تحميل المتابعة.</p>'; }

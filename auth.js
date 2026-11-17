@@ -10,8 +10,6 @@ const nameOk = n => n.trim().split(/\s+/).filter(w => w.length > 1).length >= 3;
 const emailOk = e => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e);
 const ERR = {"auth/invalid-credential":"بيانات الدخول غير صحيحة","auth/user-not-found":"بيانات الدخول غير صحيحة","auth/wrong-password":"بيانات الدخول غير صحيحة","auth/email-already-in-use":"الإيميل مسجّل بالفعل","auth/network-request-failed":"مفيش إنترنت","auth/too-many-requests":"محاولات كتير، استنى شوية","auth/invalid-email":"الإيميل غير صحيح","auth/weak-password":"كلمة السر ضعيفة"};
 const errMsg = e => ERR[e && e.code] || "حصل خطأ (" + ((e && e.code) || "unknown") + ")، حاول تاني";
-const CH = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-const genCode = () => Array.from(crypto.getRandomValues(new Uint8Array(6)), n => CH[n % 32]).join("");
 const fld = (id, ph, icon, type = "text", x = "", eye = false) => `<div class="fld"><span class="ic">${ic(icon)}</span><input id="${id}" type="${type}" placeholder="${ph}" aria-label="${ph}" ${x}>${eye ? `<button class="eye" type="button" aria-label="إظهار كلمة السر">${ic("eye")}</button>` : ""}</div>`;
 const PW = fld("pw","كلمة السر","lock","password",'autocomplete="new-password"',true) + fld("pw2","تأكيد كلمة السر","lock","password",'autocomplete="new-password"',true);
 const fields = r => fld("name","الاسم ثلاثي","user","text",'autocomplete="name"') + fld("phone", r==="student" ? "رقم الطالب" : "رقم الهاتف", "phone", "tel", 'inputmode="numeric" autocomplete="tel"') + (r==="student" ? fld("parent","رقم ولي الأمر","users","tel",'inputmode="numeric"') : "") + fld("email","الإيميل","mail","email",'autocomplete="email"') + PW + (r==="student" ? "" : `<div class="fld"><span class="ic">${ic("book")}</span><select id="subject" aria-label="المادة"><option value="">المادة</option>${SUBJECTS.map(s => `<option>${s}</option>`).join("")}</select></div>`);
@@ -72,20 +70,14 @@ async function register(role, v){
   if (pw.length < 8) return "كلمة السر 8 حروف على الأقل";
   if (pw !== pw2) return "تأكيد كلمة السر غير مطابق";
   if ((await getDoc(doc(db, "phones", phone))).exists()) return "الرقم مسجّل بالفعل";
-  let mine = null;
-  if (!st) {
-    for (let i = 0; i < 5 && !mine; i++) { const c = genCode(); if (!(await getDoc(doc(db, "codes", c))).exists()) mine = c; }
-    if (!mine) return "حصل خطأ، حاول تاني";
-  }
   state.busy = true;
   let cred;
   try {
     cred = await createUserWithEmailAndPassword(auth, email, pw);
     const uid = cred.user.uid, b = writeBatch(db);
-    b.set(doc(db, "users", uid), {name, role, status: "pending", createdAt: serverTimestamp(), ...(st ? {teachers: []} : {subject, code: mine})});
+    b.set(doc(db, "users", uid), {name, role, status: "pending", createdAt: serverTimestamp(), ...(st ? {teachers: []} : {subject})});
     b.set(doc(db, "private", uid), {phone, email, ...(st ? {parentPhone: parent} : {})});
     b.set(doc(db, "phones", phone), {uid, email});
-    if (!st) b.set(doc(db, "codes", mine), {teacherUid: uid, name, subject});
     await b.commit();
   } catch (x) {
     if (cred) await cred.user.delete().catch(() => {});
