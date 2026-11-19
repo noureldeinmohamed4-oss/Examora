@@ -154,3 +154,10 @@ input:focus-visible,select:focus-visible,button:focus-visible{outline:3px solid 
 .ytw>.ytcv[hidden]{display:none}
 .ytw>.ytmt{z-index:2;bottom:auto;height:32%;background:linear-gradient(#000 0,#000 62%,transparent);pointer-events:none}
 .ytw>.ytmt[hidden]{display:none}
+
+/* ===== تنبيه آخر دقيقة في الامتحان ===== */
+.exbar.low{background:#B3261E;color:#fff;border-radius:14px;padding:6px 12px}
+.exbar.low #tm,.exbar.low .muted{color:#fff}
+.exbar.low #tm{animation:pl 1s steps(1) infinite}
+@keyframes pl{50%{opacity:.5}}
+@media (prefers-reduced-motion:reduce){.exbar.low #tm{animation:none}}

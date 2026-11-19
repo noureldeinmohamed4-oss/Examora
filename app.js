@@ -6,6 +6,7 @@ import {renderAuth} from "./auth.js";
 import {renderAdmin} from "./admin.js";
 import {renderTeacher} from "./teacher.js";
 import {renderStudent} from "./student.js";
+import {syncClock} from "./time.js";
 
 window.__booted = true;
 const app = $("#app"), root = document.documentElement, th = $("#th"), lo = $("#lo"), hb = $("#hb");
@@ -17,11 +18,12 @@ lab();
 lo.innerHTML = ic("out");
 lo.onclick = () => signOut(auth);
 
-let pt, sessUid = null, unsub = null;
+let pt, sessUid = null, unsub = null, clk = false;
 async function route(u){
   if (state.busy) return;
   clearTimeout(pt);
   lo.hidden = hb.hidden = !u;
+  if (u && !clk) { clk = true; syncClock(); }
   if (!u) { sessUid = null; if (unsub) { unsub(); unsub = null; } if (!$("#f", app)) renderAuth(app, () => route(auth.currentUser)); return; }
   if (u.email === ADMIN_EMAIL) { if (!$("#ls", app)) renderAdmin(app); return; }
   if (sessUid !== u.uid) { sessUid = u.uid; if (unsub) unsub(); const SID = crypto.randomUUID(); setDoc(doc(db, "sessions", u.uid), {sid: SID, at: serverTimestamp()}).then(() => { unsub = onSnapshot(doc(db, "sessions", u.uid), s => { if (s.exists() && s.data().sid !== SID) { alert("الحساب اتفتح من جهاز تاني"); signOut(auth); } }); }).catch(() => {}); }

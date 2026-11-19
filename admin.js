@@ -1,6 +1,7 @@
 import {db} from "./firebase.js";
 import {collection, query, where, getDocs, doc, getDoc, updateDoc} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {$, esc, toast, ic} from "./ui.js";
+import {finished, endAt, fdt, tms} from "./time.js";
 
 const TABS = [["pending","قيد المراجعة"],["active","مفعّلة"],["suspended","موقوفة"]];
 const TOP = [["acc","الحسابات"],["cnt","المدرسين والمحتوى"]];
@@ -80,7 +81,7 @@ export function renderAdmin(el){
     const names = {}; links.forEach(l => { names[l.studentUid] = l.studentName; });
     const view = {
       lec: () => lects.length ? lects.map(l => `<div class="item"><b>${esc(l.title)}</b>${l.hidden ? " <small class='muted'>مخفية</small>" : ""}${l.parts.length ? l.parts.map(p => `<small>${TN[p.type]} · ${esc(p.title)}</small>`).join("") : "<small>مفيش أجزاء</small>"}</div>`).join("") : '<p class="muted center">مفيش محاضرات</p>',
-      exm: () => exams.length ? exams.map(e => { const a = atts.filter(x => x.examId === e.id); return `<div class="item lrow"><div class="lt"><b>${esc(e.title)}</b><small>${e.published ? "منشور" : "مسودة"} · ${e.questions.length} سؤال · ينتهي ${fm(e.end)}</small><small>دخل ${a.length} · سلّم ${a.filter(x => x.submitted).length}</small></div><button class="btn s sm" type="button" data-e="${e.id}">الدرجات</button></div>`; }).join("") : '<p class="muted center">مفيش امتحانات</p>',
+      exm: () => exams.length ? exams.map(e => { const a = atts.filter(x => x.examId === e.id); return `<div class="item lrow"><div class="lt"><b>${esc(e.title)}</b><small>${e.published ? "منشور" : "مسودة"} · ${e.questions.length} سؤال · ينتهي ${fm(e.end)}</small><small>دخل ${a.length} · سلّم ${a.filter(x => finished(x, e)).length}</small></div><button class="btn s sm" type="button" data-e="${e.id}">الدرجات</button></div>`; }).join("") : '<p class="muted center">مفيش امتحانات</p>',
       hw: () => hws.length ? hws.map(h => { const s = subs.filter(x => x.partId === h.id); return `<div class="item lrow"><div class="lt"><b>${esc(h.title)}</b><small>تسليمات ${s.length}</small></div><button class="btn s sm" type="button" data-h="${h.id}">التسليمات</button></div>`; }).join("") : '<p class="muted center">مفيش واجبات</p>',
       stu: () => links.length ? links.map(l => `<div class="item"><b>${esc(l.studentName)}</b><small>${l.status === "suspended" ? "موقوف" : "نشط"}</small></div>`).join("") : '<p class="muted center">مفيش طلاب</p>'
     };
@@ -101,7 +102,7 @@ export function renderAdmin(el){
     const score = a => qs.reduce((s, q) => s + (gr(a, q) || 0), 0);
     const pend = a => qs.some(q => q.type === "essay" && (a.grades || {})[q.id] == null);
     const rows = [...atts].sort((a, b) => score(b) - score(a));
-    body.innerHTML = `<div class="card">${back("bk")}<h2 class="h" style="margin-top:10px">${esc(ex.title)}</h2><p class="muted small">${esc(t.name)} · الدرجة الكلية ${total}</p></div><div class="card" style="margin-top:14px;overflow-x:auto"><table class="tbl"><tr><th>#</th><th>الاسم</th><th>الدرجة</th><th>الحالة</th></tr>${rows.map((a, i) => `<tr><td>${i + 1}</td><td>${esc(names[a.studentUid] || "طالب")}</td><td>${score(a)} / ${total}</td><td>${a.submitted ? "سلّم" : "لسه"}${pend(a) ? " · مقالي مستني" : ""}${a.released ? " · ظاهرة" : ""}</td></tr>`).join("") || '<tr><td colspan="4" class="muted center">لسه ما حدش دخل.</td></tr>'}</table></div>`;
+    body.innerHTML = `<div class="card">${back("bk")}<h2 class="h" style="margin-top:10px">${esc(ex.title)}</h2><p class="muted small">${esc(t.name)} · الدرجة الكلية ${total}</p></div><div class="card" style="margin-top:14px;overflow-x:auto"><table class="tbl"><tr><th>#</th><th>الاسم</th><th>الدرجة</th><th>دخل</th><th>خلّص</th><th>الحالة</th></tr>${rows.map((a, i) => `<tr><td>${i + 1}</td><td>${esc(names[a.studentUid] || "طالب")}</td><td>${score(a)} / ${total}</td><td>${esc(fdt(tms(a.startedAt)))}</td><td>${finished(a, ex) ? esc(fdt(endAt(a, ex))) : "—"}</td><td>${a.submitted ? "سلّم" : finished(a, ex) ? "انتهى وقته" : "لسه"}${pend(a) ? " · مقالي مستني" : ""}${a.released ? " · ظاهرة" : ""}</td></tr>`).join("") || '<tr><td colspan="6" class="muted center">لسه ما حدش دخل.</td></tr>'}</table></div>`;
     $("#bk", body).onclick = bk;
   }
 

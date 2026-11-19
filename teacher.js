@@ -5,6 +5,7 @@ import {examBuilder} from "./exam.js";
 import {hwBuilder, hwSubView} from "./homework.js";
 import {examResults} from "./results.js";
 import {pickUpload, upMsg} from "./media.js";
+import {finished, endAt, fdt} from "./time.js";
 
 const TYPES = {explain: ["شرح", "vid"], homework: ["واجب", "doc"], exam: ["امتحان", "exam"]};
 const GRADES = ["الصف الأول الابتدائي", "الصف الثاني الابتدائي", "الصف الثالث الابتدائي", "الصف الرابع الابتدائي", "الصف الخامس الابتدائي", "الصف السادس الابتدائي", "الصف الأول الإعدادي", "الصف الثاني الإعدادي", "الصف الثالث الإعدادي", "الصف الأول الثانوي", "الصف الثاني الثانوي", "الصف الثالث الثانوي"];
@@ -79,11 +80,11 @@ export async function renderTeacher(el, uid, d){
     gr.atts.forEach(a => {
       const e = byEx[a.examId]; if (!e) return;
       cnt[e.id] = (cnt[e.id] || 0) + 1;
-      const fin = a.submitted || Date.now() > e.end + 20000;
+      const fin = finished(a, e);
       if (fin && (e.questions || []).some(q => q.type === "essay" && (a.grades || {})[q.id] == null)) pend.push({a, e});
       const n = Object.keys(a.reviews || {}).length; if (n) rv[e.id] = (rv[e.id] || 0) + n;
     });
-    pend.sort((x, y) => tms(y.a.submittedAt) - tms(x.a.submittedAt));
+    pend.sort((x, y) => endAt(y.a, y.e) - endAt(x.a, x.e));
     return {pend, rv, cnt, exams: [...gx].sort((x, y) => (y.start || 0) - (x.start || 0))};
   };
   const backGr = () => { gr = null; home(); loadGr().then(home); };
@@ -335,21 +336,25 @@ ${g && gmenu ? `<div class="item" style="margin-top:10px"><b>تعديل اسم �
     if (P) P.docs.forEach(z => { pr[z.data().partId] = z.data(); });
     if (S) S.docs.forEach(z => { sb[z.data().partId] = {id: z.id, ...z.data()}; });
     if (A) A.docs.forEach(z => { at[z.data().examId] = z.data(); });
+    const exd = {};
+    if (A) await Promise.all(Object.keys(at).map(async id => { try { const z = await getDoc(doc(db, "exams", id)); if (z.exists()) exd[id] = z.data(); } catch (e) {} }));
+    const fx = pt => { const a = at[pt.id]; return !!a && (a.submitted || (exd[pt.id] ? finished(a, exd[pt.id]) : false)); };
     const created = tms(us.createdAt), seen = ss ? tms(ss.at) : 0;
-    const dn = pt => pt.type === "explain" ? !!(pr[pt.id] && pr[pt.id].done !== false) : pt.type === "homework" ? !!sb[pt.id] : !!(at[pt.id] && at[pt.id].submitted);
+    const dn = pt => pt.type === "explain" ? !!(pr[pt.id] && pr[pt.id].done !== false) : pt.type === "homework" ? !!sb[pt.id] : fx(pt);
     const all = lects.flatMap(l => l.parts), fin = all.filter(dn).length;
     const status = pt => {
       if (!P && pt.type === "explain" || !S && pt.type === "homework" || !A && pt.type === "exam") return "—";
       if (pt.type === "explain") { const z = pr[pt.id]; return z && z.done !== false ? '<span class="okm">✓ خلّص</span>' : z && z.pct > 0 ? "شاهد " + z.pct + "%" : "لسه ما بدأش"; }
       if (pt.type === "homework") return sb[pt.id] ? '<span class="okm">✓ سلّم</span>' : "لسه ما سلّمش";
       const a = at[pt.id]; if (!a) return "لسه ما دخلش";
-      return (a.submitted ? '<span class="okm">✓ سلّم</span>' : "لسه بيحل") + (a.released && a.result ? " · " + a.result.score + " من " + a.result.total : "");
+      return (a.submitted ? '<span class="okm">✓ سلّم</span>' : fx(pt) ? '<span class="okm">✓ انتهى وقته</span>' : "لسه بيحل") + (a.released && a.result ? " · " + a.result.score + " من " + a.result.total : "");
     };
     const sub = pt => {
       if (pt.type === "homework" && sb[pt.id] && tms(sb[pt.id].createdAt)) return `<small>${fullFmt(tms(sb[pt.id].createdAt))}</small>`;
       const a = pt.type === "exam" && at[pt.id]; if (!a) return "";
       const xs = exOut(a);
-      return `<small>خروج من الصفحة: ${xs.length} مرة${xs.length ? " · " + xs.reduce((t, z) => t + z.d, 0) + " ث" : ""}</small>`;
+      const tt = exd[pt.id] ? `<small>دخل: ${fdt(tms(a.startedAt))} · خلّص: ${fdt(endAt(a, exd[pt.id]))}${a.submitted ? "" : " (انتهى وقته)"}</small>` : `<small>دخل: ${fdt(tms(a.startedAt))}</small>`;
+      return tt + `<small>خروج من الصفحة: ${xs.length} مرة${xs.length ? " · " + xs.reduce((t, z) => t + z.d, 0) + " ث" : ""}</small>`;
     };
     el.innerHTML = `<div class="card"><button id="bk" class="lnk" type="button">${ic("back", 18)} رجوع</button><h2 class="h" style="margin-top:10px">${esc(x.studentName)}</h2>
 <div class="item"><small>رقم الطالب</small>${p && p.exists() ? tel(pv.phone) : "—"}</div>

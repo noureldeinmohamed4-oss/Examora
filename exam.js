@@ -3,6 +3,7 @@ import {collection, query, where, getDocs, doc, getDoc, setDoc, updateDoc, delet
 import {$, esc, toast, ic} from "./ui.js";
 import {examResults} from "./results.js";
 import {pickUpload, upMsg, pick, isCl, urlImgs} from "./media.js";
+import {now, tms, syncClock, calibrate, deadline} from "./time.js";
 
 const toLocal = ms => ms ? new Date(ms - new Date(ms).getTimezoneOffset() * 60000).toISOString().slice(0, 16) : "";
 const TN = {mcq: "اختيار من متعدد", tf: "صح / خطأ", essay: "مقالي"};
@@ -110,43 +111,108 @@ export async function examSolve(el, uid, ex, att, back, who){
   const id = ex.id + "_" + uid;
   const wm = `<div class="wm" aria-hidden="true" style="background-image:url('${wmUrl((who || "Examora") + " · " + uid.slice(0, 4))}')"></div>`;
   try {
+    const ip = await syncClock();
     if (!att) {
-      const n = Date.now();
+      const n = now();
       if (n < ex.start || n > ex.end) return toast("الامتحان مش متاح دلوقتي");
-      const ip = await Promise.race([fetch("/api/ip", {cache: "no-store"}).then(r => r.json()).then(j => String(j.ip || "").slice(0, 64)), new Promise(r => setTimeout(() => r(""), 3000))]).catch(() => "");
       await setDoc(doc(db, "attempts", id), {examId: ex.id, studentUid: uid, teacherUid: ex.teacherUid, startedAt: serverTimestamp(), answers: {}, submitted: false, ip});
       att = (await getDoc(doc(db, "attempts", id))).data({serverTimestamps: "estimate"});
+      calibrate(tms(att.startedAt));
     }
   } catch (e) { return toast("تعذّر بدء الامتحان"); }
   if (att.submitted) return toast("تم تسليم الامتحان");
-  const dl = Math.min(att.startedAt.toMillis() + ex.duration * 60000, ex.end), qs = ex.questions;
+  const dl = deadline(att, ex), qs = ex.questions;
+  if (now() > dl + 20000) return toast("وقتك في الامتحان خلص");
   const ans = {...att.answers};
-  let cur = 0, done = false, tm, dbn, hidAt = 0, hidP = false;
+  let cur = 0, done = false, tm, fq, hidAt = 0, hidP = false;
   const exits = [...(att.exits || [])], blurs = [...(att.blurs || [])];
-  let blAt = 0, blP = false, blX = 0, quiet = 0;
+  let blAt = 0, blP = false, blX = 0, quiet = 0, xv = 0, xs = 0, lastS = -1, alerted = false;
+
+  /* حفظ الإجابات: بتتسجّل على الجهاز فورًا وبتتبعت لـ Firestore كل فترة (وعند الخروج من الصفحة والتسليم) */
+  const lk = "exa:" + id, pend = {};
+  let ls = true;
+  const okv = v => v === null || typeof v === "boolean" || typeof v === "number" || (typeof v === "string" && v.length <= 30000) || (Array.isArray(v) && v.length <= 3 && v.every(s => typeof s === "string" && s.length <= 500));
+  try { localStorage.setItem(lk + ":t", "1"); localStorage.removeItem(lk + ":t"); } catch (e) { ls = false; }
+  if (ls) {
+    try {
+      const r = JSON.parse(localStorage.getItem(lk) || "null");
+      if (r && typeof r === "object" && !Array.isArray(r)) Object.entries(r).forEach(([k, v]) => { if (/^[A-Za-z0-9_-]{1,40}$/.test(k) && okv(v)) { pend[k] = v; if (v === null) delete ans[k]; else ans[k] = v; } });
+    } catch (e) {}
+  }
+  const saveLocal = () => { if (!ls) return; try { if (Object.keys(pend).length) localStorage.setItem(lk, JSON.stringify(pend)); else localStorage.removeItem(lk); } catch (e) { ls = false; } };
+  const send = async extra => {
+    const sp = {...pend}, sx = xv, p = {...extra};
+    Object.entries(sp).forEach(([k, v]) => { p["answers." + k] = v === null ? deleteField() : v; });
+    if (xv !== xs) { p.exits = exits; p.blurs = blurs; }
+    if (!Object.keys(p).length) return true;
+    try { await updateDoc(doc(db, "attempts", id), p); } catch (e) { return false; }
+    Object.keys(sp).forEach(k => { if (k in pend && JSON.stringify(pend[k]) === JSON.stringify(sp[k])) delete pend[k]; });
+    xs = sx;
+    saveLocal();
+    return true;
+  };
+  const gap = () => (ls ? 100000 : 20000) + Math.random() * 30000;
+  const sched = () => { fq = setTimeout(async () => { await send({}); if (!done) sched(); }, gap()); };
+  sched();
+  const ph = () => { if (!done) send({}); };
+  window.addEventListener("pagehide", ph);
+
+  /* تنبيه آخر دقيقة: لون أحمر + صوت تك تك + اهتزاز (الاهتزاز على أندرويد بس) */
+  const AC = window.AudioContext || window.webkitAudioContext;
+  let ctx = null;
+  const unlock = () => { try { if (!ctx && AC) ctx = new AC(); if (ctx && ctx.state === "suspended") ctx.resume(); } catch (e) {} };
+  el.addEventListener("pointerdown", unlock);
+  const beep = hi => {
+    if (!ctx || ctx.state !== "running") return;
+    try {
+      const o = ctx.createOscillator(), g = ctx.createGain(), t = ctx.currentTime;
+      o.type = "square"; o.frequency.value = hi ? 1500 : 1100;
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.2, t + 0.005); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.07);
+      o.connect(g); g.connect(ctx.destination); o.start(t); o.stop(t + 0.08);
+    } catch (e) {}
+  };
+  const buzz = p => { try { if (navigator.vibrate) navigator.vibrate(p); } catch (e) {} };
+
   const onBlur = () => { if (done || blAt || Date.now() < quiet) return; blAt = Date.now(); blP = pick.active; blX = exits.length; };
   const onFocus = () => {
     if (!blAt) return;
     const t0 = blAt, d = Math.round((Date.now() - t0) / 1000), p = blP, x0 = blX; blAt = 0;
-    setTimeout(() => { if (done || d < 2 || exits.length > x0) return; blurs.push({t: t0, d, ...(p ? {p: 1} : {})}); updateDoc(doc(db, "attempts", id), {blurs}).catch(() => {}); }, 400);
+    setTimeout(() => { if (done || d < 2 || exits.length > x0) return; blurs.push({t: t0, d, ...(p ? {p: 1} : {})}); xv++; }, 400);
   };
   window.addEventListener("blur", onBlur); window.addEventListener("focus", onFocus);
-  const vis = () => { if (done) return; if (document.hidden) { hidAt = Date.now(); hidP = pick.active; } else if (hidAt) { exits.push({t: hidAt, d: Math.round((Date.now() - hidAt) / 1000), ...(hidP ? {p: 1} : {})}); hidAt = 0; updateDoc(doc(db, "attempts", id), {exits}).catch(() => {}); } };
+  const vis = () => { if (done) return; if (document.hidden) { hidAt = Date.now(); hidP = pick.active; send({}); } else if (hidAt) { exits.push({t: hidAt, d: Math.round((Date.now() - hidAt) / 1000), ...(hidP ? {p: 1} : {})}); xv++; hidAt = 0; } };
   document.addEventListener("visibilitychange", vis);
   el.oncopy = el.oncut = el.onpaste = el.oncontextmenu = e => e.preventDefault();
   const has = q => (ans[q.id] != null && ans[q.id] !== "") || (ans[q.id + "_i"] || []).length > 0;
-  const putk = (k, v) => { if (v === null || v === "") { delete ans[k]; v = deleteField(); } else ans[k] = v; updateDoc(doc(db, "attempts", id), {["answers." + k]: v}).catch(() => {}); };
+  const putk = (k, v) => { if (v === "") v = null; if (v === null) delete ans[k]; else ans[k] = v; pend[k] = v; saveLocal(); };
   const put = (q, v) => putk(q.id, v);
-  const finish = () => {
-    if (done) return; done = true; clearInterval(tm); document.removeEventListener("visibilitychange", vis); window.removeEventListener("blur", onBlur); window.removeEventListener("focus", onFocus);
-    el.oncopy = el.oncut = el.onpaste = el.oncontextmenu = null;
-    updateDoc(doc(db, "attempts", id), {submitted: true, submittedAt: serverTimestamp()}).catch(() => {});
-    el.innerHTML = '<div class="card center"><h2 class="h">تم تسليم الامتحان</h2><p class="muted">النتيجة هتظهر بعد ما المدرس يخلّص التصحيح.</p><button id="bk" class="btn p full" type="button">رجوع</button></div>';
+  const doneHtml = '<div class="card center"><h2 class="h">تم تسليم الامتحان</h2><p class="muted">النتيجة هتظهر بعد ما المدرس يخلّص التصحيح.</p><button id="bk" class="btn p full" type="button">رجوع</button></div>';
+  const submit = async () => {
+    el.innerHTML = '<div class="card center"><p class="muted">جاري التسليم…</p></div>';
+    let ok = false;
+    for (let i = 0; i < 3 && !ok; i++) { ok = await send({submitted: true, submittedAt: serverTimestamp()}); if (!ok && i < 2) await new Promise(r => setTimeout(r, 1500)); }
+    if (ok) { el.innerHTML = doneHtml; $("#bk", el).onclick = back; return; }
+    const late = now() > dl + 20000;
+    el.innerHTML = `<div class="card center"><h2 class="h">${late ? "الوقت خلص" : "التسليم لسه ما وصلش"}</h2><p class="muted">${late ? "اللي اتحفظ قبل كده هو اللي هيتحسب." : "تأكد من الإنترنت واضغط إعادة المحاولة. إجاباتك محفوظة على جهازك."}</p>${late ? "" : '<button id="rt" class="btn p full" type="button">إعادة المحاولة</button>'}<button id="bk" class="btn s full" type="button">رجوع</button></div>`;
     $("#bk", el).onclick = back;
+    const rt = $("#rt", el); if (rt) rt.onclick = submit;
+  };
+  const finish = () => {
+    if (done) return; done = true; clearInterval(tm); clearTimeout(fq);
+    document.removeEventListener("visibilitychange", vis); window.removeEventListener("blur", onBlur); window.removeEventListener("focus", onFocus); window.removeEventListener("pagehide", ph); el.removeEventListener("pointerdown", unlock);
+    el.oncopy = el.oncut = el.onpaste = el.oncontextmenu = null;
+    try { if (ctx) ctx.close(); } catch (e) {}
+    return submit();
   };
   const tick = () => {
-    const r = dl - Date.now(); if (r <= 0) return finish();
+    const r = dl - now(); if (r <= 0) return finish();
     const t = $("#tm", el); if (t) t.textContent = String(Math.floor(r / 60000)).padStart(2, "0") + ":" + String(Math.floor(r / 1000) % 60).padStart(2, "0");
+    const low = r <= 60000, bar = $(".exbar", el); if (bar) bar.classList.toggle("low", low);
+    if (low) {
+      if (!alerted) { alerted = true; buzz([200, 100, 200, 100, 200]); }
+      const s = Math.ceil(r / 1000);
+      if (s !== lastS) { lastS = s; if (!document.hidden) { beep(s % 2 === 0); if (s <= 10) buzz(60); } }
+    }
   };
   const draw = () => {
     const q = qs[cur];
@@ -159,7 +225,7 @@ export async function examSolve(el, uid, ex, att, back, who){
       const v = q.type === "tf" ? b.dataset.o === "1" : +b.dataset.o;
       put(q, ans[q.id] === v ? null : v); draw();
     });
-    const ea = $("#ea", el); if (ea) ea.oninput = () => { clearTimeout(dbn); dbn = setTimeout(() => { put(q, ea.value.trim() ? ea.value : null); }, 500); ea.onblur = () => put(q, ea.value.trim() ? ea.value : null); };
+    const ea = $("#ea", el); if (ea) ea.oninput = () => put(q, ea.value.trim() ? ea.value : null);
     const fl = () => { const t = $("#ea", el); if (t) put(q, t.value.trim() ? t.value : null); };
     const ei = $("#ei", el);
     if (ei) ei.onclick = async () => {
