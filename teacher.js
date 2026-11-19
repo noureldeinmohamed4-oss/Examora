@@ -81,7 +81,7 @@ export async function renderTeacher(el, uid, d){
       const e = byEx[a.examId]; if (!e) return;
       cnt[e.id] = (cnt[e.id] || 0) + 1;
       const fin = finished(a, e);
-      if (fin && (e.questions || []).some(q => q.type === "essay" && (a.grades || {})[q.id] == null)) pend.push({a, e});
+      if (fin && (e.essayIds || (e.questions || []).filter(q => q.type === "essay").map(q => q.id)).some(qid => (a.grades || {})[qid] == null)) pend.push({a, e});
       const n = Object.keys(a.reviews || {}).length; if (n) rv[e.id] = (rv[e.id] || 0) + n;
     });
     pend.sort((x, y) => endAt(y.a, y.e) - endAt(x.a, x.e));
@@ -226,7 +226,7 @@ ${g && gmenu ? `<div class="item" style="margin-top:10px"><b>تعديل اسم �
       const keys = [], mid = [], hws = [], exs = [];
       for (const l of lects) {
         const [E, H] = await Promise.all([q("exams", where("lectureId", "==", l.id)), q("homeworks", where("lectureId", "==", l.id))]);
-        for (const e of E.docs) { keys.push(doc(db, "exams", e.id, "key", "main")); exs.push(e.ref); (await q("attempts", where("examId", "==", e.id))).docs.forEach(a => mid.push(a.ref)); }
+        for (const e of E.docs) { keys.push(doc(db, "exams", e.id, "key", "main"), doc(db, "exams", e.id, "paper", "main")); exs.push(e.ref); (await q("attempts", where("examId", "==", e.id))).docs.forEach(a => mid.push(a.ref)); }
         for (const h of H.docs) { hws.push(h.ref); (await q("subs", where("partId", "==", h.id))).docs.forEach(a => mid.push(a.ref)); }
         for (const p of l.parts) if (p.type === "explain") (await q("progress", where("partId", "==", p.id))).docs.forEach(a => mid.push(a.ref));
       }

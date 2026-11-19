@@ -1,5 +1,5 @@
 import {db} from "./firebase.js";
-import {collection, query, where, getDocs, doc, getDoc, setDoc, updateDoc, deleteField, serverTimestamp} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import {collection, query, where, getDocs, doc, getDoc, setDoc, updateDoc, deleteField, arrayUnion, serverTimestamp} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {$, esc, toast, ic} from "./ui.js";
 import {examResults} from "./results.js";
 import {pickUpload, upMsg, pick, isCl, urlImgs} from "./media.js";
@@ -15,10 +15,13 @@ export async function examBuilder(el, uid, lec, part, back){
   try {
     const s = await getDoc(doc(db, "exams", part.id));
     if (s.exists()) {
-      ex = {...ex, ...s.data()};
+      const d0 = s.data();
+      ex = {...ex, ...d0};
+      let qs0 = Array.isArray(d0.questions) ? d0.questions : null;
+      if (!qs0) { const p = await getDoc(doc(db, "exams", part.id, "paper", "main")); qs0 = p.exists() ? (p.data().questions || []) : []; }
       const k = await getDoc(doc(db, "exams", part.id, "key", "main"));
       const a = k.exists() ? k.data().answers : {};
-      ex.questions = ex.questions.map(q => ({...q, ans: a[q.id] ?? null}));
+      ex.questions = qs0.map(q => ({...q, ans: a[q.id] ?? null}));
     }
   } catch (e) {}
   let locked = 0;
@@ -55,7 +58,7 @@ ${q.type === "mcq" ? q.options.map((o, k) => `<div class="optrow"><input type="r
     $("#sd", el).onclick = () => save(false);
     $("#sp", el).onclick = () => save(true);
     const un = $("#un", el); if (un) un.onclick = () => save(false);
-    const rs = $("#rs", el); if (rs) rs.onclick = () => examResults(el, uid, {id: part.id, title: ex.title, start: ex.start, end: ex.end, duration: ex.duration, questions: ex.questions.map(({ans, ...r}) => r)}, () => examBuilder(el, uid, lec, part, back));
+    const rs = $("#rs", el); if (rs) rs.onclick = () => examResults(el, uid, {id: part.id, title: ex.title, start: ex.start, end: ex.end, duration: ex.duration}, () => examBuilder(el, uid, lec, part, back));
   };
   const meta = () => {
     ex.title = $("#et", el).value.trim();
@@ -92,9 +95,12 @@ ${q.type === "mcq" ? q.options.map((o, k) => `<div class="optrow"><input type="r
     msg.textContent = "";
     try {
       const qs = ex.questions.map(({ans, ...r}) => ({...r, imgs: (r.imgs || []).slice(0, 2), options: r.type === "mcq" ? r.options.map(o => o.trim()) : []}));
-      await setDoc(doc(db, "exams", part.id), {teacherUid: uid, lectureId: lec.id, partId: part.id, title: ex.title, start: ex.start, end: ex.end, duration: ex.duration, questions: qs, published: pub, updatedAt: serverTimestamp()}, {merge: true});
+      const main = {teacherUid: uid, lectureId: lec.id, partId: part.id, title: ex.title, start: ex.start, end: ex.end, duration: ex.duration, qCount: qs.length, pts: total(), essayIds: qs.filter(q => q.type === "essay").map(q => q.id), questions: deleteField(), updatedAt: serverTimestamp()};
+      await setDoc(doc(db, "exams", part.id), {...main, published: !!ex.published}, {merge: true});
+      await setDoc(doc(db, "exams", part.id, "paper", "main"), {questions: qs});
       const a = {}; ex.questions.forEach(q => { if (q.type !== "essay") a[q.id] = q.ans; });
       await setDoc(doc(db, "exams", part.id, "key", "main"), {answers: a});
+      if (pub !== !!ex.published) await setDoc(doc(db, "exams", part.id), {published: pub}, {merge: true});
       ex.published = pub; toast(pub ? "تم النشر" : "تم الحفظ"); draw();
     } catch (e) { bad("حصل خطأ، حاول تاني"); }
   }
@@ -110,19 +116,33 @@ const wmUrl = who => {
 export async function examSolve(el, uid, ex, att, back, who){
   const id = ex.id + "_" + uid;
   const wm = `<div class="wm" aria-hidden="true" style="background-image:url('${wmUrl((who || "Examora") + " · " + uid.slice(0, 4))}')"></div>`;
+  const dev = () => { let z = ""; try { z = Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch (e) {} return (navigator.userAgent + " | " + screen.width + "x" + screen.height + " | " + z).slice(0, 400); };
+  const logIp = async (first, ip) => {
+    const ref = doc(db, "ips", id), rec = {examId: ex.id, studentUid: uid, teacherUid: ex.teacherUid, ip: ip || "", ua: dev(), at: serverTimestamp()};
+    if (first) { try { await setDoc(ref, rec); } catch (e) {} return; }
+    try { await updateDoc(ref, {log: arrayUnion({ip: ip || "", ua: rec.ua, t: now()})}); }
+    catch (e) { try { await setDoc(ref, rec); } catch (e2) {} }
+  };
+  let first = false, ipn = "";
   try {
-    const ip = await syncClock();
+    const ip = await syncClock(); ipn = ip;
     if (!att) {
       const n = now();
       if (n < ex.start || n > ex.end) return toast("الامتحان مش متاح دلوقتي");
-      await setDoc(doc(db, "attempts", id), {examId: ex.id, studentUid: uid, teacherUid: ex.teacherUid, startedAt: serverTimestamp(), answers: {}, submitted: false, ip});
+      await setDoc(doc(db, "attempts", id), {examId: ex.id, studentUid: uid, teacherUid: ex.teacherUid, startedAt: serverTimestamp(), answers: {}, submitted: false});
       att = (await getDoc(doc(db, "attempts", id))).data({serverTimestamps: "estimate"});
-      calibrate(tms(att.startedAt));
+      calibrate(tms(att.startedAt)); first = true;
     }
   } catch (e) { return toast("تعذّر بدء الامتحان"); }
+  logIp(first, ipn);
   if (att.submitted) return toast("تم تسليم الامتحان");
-  const dl = deadline(att, ex), qs = ex.questions;
+  const dl = deadline(att, ex);
   if (now() > dl + 20000) return toast("وقتك في الامتحان خلص");
+  let qs = ex.questions;
+  if (!qs) {
+    try { const p = await getDoc(doc(db, "exams", ex.id, "paper", "main")); qs = p.exists() ? p.data().questions : null; } catch (e) {}
+    if (!qs || !qs.length) return toast("تعذّر تحميل الأسئلة، حاول تاني");
+  }
   const ans = {...att.answers};
   let cur = 0, done = false, tm, fq, hidAt = 0, hidP = false;
   const exits = [...(att.exits || [])], blurs = [...(att.blurs || [])];

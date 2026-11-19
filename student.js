@@ -4,6 +4,7 @@ import {$, esc, toast, ic} from "./ui.js";
 import {examSolve} from "./exam.js";
 import {hwStudent} from "./homework.js";
 import {isCl, urlImgs} from "./media.js";
+import {now, finished, expired} from "./time.js";
 
 const TYPES = {explain: ["شرح", "vid"], homework: ["واجب", "doc"], exam: ["امتحان", "exam"]};
 const fm = ms => new Date(ms).toLocaleString("ar-EG", {dateStyle: "medium", timeStyle: "short"});
@@ -54,6 +55,7 @@ function trackYT(p, init, on){
 
 export async function renderStudent(el, uid, d){
   let links = [];
+  const cache = {};
   const run = async (fn, ok) => { try { await fn(); if (ok) toast(ok); } catch (e) { toast("حصل خطأ، حاول تاني"); } };
   const load = async () => {
     const s = await getDocs(query(collection(db, "links"), where("studentUid", "==", uid)));
@@ -88,35 +90,45 @@ export async function renderStudent(el, uid, d){
     }));
   }
 
-  async function teacher(l){
+  async function teacher(l, stale){
     el.innerHTML = '<p class="muted center">جاري التحميل…</p>';
-    let lects;
+    let D = cache[l.id];
     const fail = m => { el.innerHTML = `<div class="card"><button id="bk" class="lnk" type="button">${ic("back", 18)} رجوع</button><p class="err">${m}</p></div>`; $("#bk", el).onclick = home; };
     if (!l.groupId) return fail("المدرس لسه بيجهّز مجموعتك. حاول تاني بعد شوية.");
-    try {
-      const s = await getDocs(query(collection(db, "lectures"), where("teacherUid", "==", l.teacherUid), where("groupId", "==", l.groupId), where("hidden", "==", false)));
-      lects = s.docs.map(x => ({id: x.id, ...x.data()})).sort((a, b) => a.order - b.order);
-    } catch (e) { return fail("تعذّر تحميل المحاضرات. ممكن المدرس يكون نقلك أو مسح المجموعة، أو اتأكد من الإنترنت."); }
     const g = (c, ...w) => getDocs(query(collection(db, c), ...w)).then(s => s.docs).catch(() => []);
-    const [E, H, A, S, P] = await Promise.all([
-      g("exams", where("teacherUid", "==", l.teacherUid), where("published", "==", true)),
-      g("homeworks", where("teacherUid", "==", l.teacherUid)),
-      g("attempts", where("studentUid", "==", uid)),
-      g("subs", where("studentUid", "==", uid)),
-      g("progress", where("studentUid", "==", uid))]);
-    const exs = {}, hws = {}, atts = {}, subs = {}, prog = {}, wat = {}, pmap = {};
-    E.forEach(x => { exs[x.id] = {id: x.id, ...x.data()}; });
-    H.forEach(x => { hws[x.id] = {id: x.id, ...x.data()}; });
-    A.forEach(x => { atts[x.data().examId] = {id: x.id, ...x.data()}; });
-    S.forEach(x => { subs[x.data().partId] = {id: x.id, ...x.data()}; });
-    P.forEach(x => { const q = x.data(); wat[q.partId] = q.watch || {}; if (q.done !== false) prog[q.partId] = 1; });
-    lects.forEach(x => x.parts.forEach(p => { pmap[p.id] = p; }));
-    const done = p => p.type === "exam" ? !!(atts[p.id] && atts[p.id].submitted) : p.type === "homework" ? !!subs[p.id] : !!prog[p.id];
+    if (!D || !stale || Date.now() - D.t > 120000) {
+      let lects;
+      try {
+        const s = await getDocs(query(collection(db, "lectures"), where("teacherUid", "==", l.teacherUid), where("groupId", "==", l.groupId), where("hidden", "==", false)));
+        lects = s.docs.map(x => ({id: x.id, ...x.data()})).sort((a, b) => a.order - b.order);
+      } catch (e) { return fail("تعذّر تحميل المحاضرات. ممكن المدرس يكون نقلك أو مسح المجموعة، أو اتأكد من الإنترنت."); }
+      const [E, H, A, S, P] = await Promise.all([
+        g("exams", where("teacherUid", "==", l.teacherUid), where("published", "==", true)),
+        g("homeworks", where("teacherUid", "==", l.teacherUid)),
+        g("attempts", where("studentUid", "==", uid)),
+        g("subs", where("studentUid", "==", uid)),
+        g("progress", where("studentUid", "==", uid))]);
+      const exs = {}, hws = {}, atts = {}, subs = {}, prog = {}, wat = {}, pmap = {};
+      E.forEach(x => { exs[x.id] = {id: x.id, ...x.data()}; });
+      H.forEach(x => { hws[x.id] = {id: x.id, ...x.data()}; });
+      A.forEach(x => { atts[x.data().examId] = {id: x.id, ...x.data()}; });
+      S.forEach(x => { subs[x.data().partId] = {id: x.id, ...x.data()}; });
+      P.forEach(x => { const q = x.data(); wat[q.partId] = q.watch || {}; if (q.done !== false) prog[q.partId] = 1; });
+      lects.forEach(x => x.parts.forEach(p => { pmap[p.id] = p; }));
+      D = cache[l.id] = {t: Date.now(), lects, exs, hws, atts, subs, prog, wat, pmap};
+    } else {
+      /* رجوع من شاشة فرعية: بنعيد تحميل اللي اتغيّر بس */
+      if (stale.includes("A")) { const A = await g("attempts", where("studentUid", "==", uid)); Object.keys(D.atts).forEach(k => delete D.atts[k]); A.forEach(x => { D.atts[x.data().examId] = {id: x.id, ...x.data()}; }); }
+      if (stale.includes("S")) { const S = await g("subs", where("studentUid", "==", uid)); Object.keys(D.subs).forEach(k => delete D.subs[k]); S.forEach(x => { D.subs[x.data().partId] = {id: x.id, ...x.data()}; }); }
+    }
+    const {lects, exs, hws, atts, subs, prog, wat, pmap} = D;
+    const done = p => p.type === "exam" ? !!(atts[p.id] && (atts[p.id].submitted || (exs[p.id] ? finished(atts[p.id], exs[p.id]) : false))) : p.type === "homework" ? !!subs[p.id] : !!prog[p.id];
     const exBtn = p => {
       const e = exs[p.id]; if (!e) return '<span class="muted small">لسه ما اتجهزش</span>';
-      const a = atts[p.id], n = Date.now();
+      const a = atts[p.id], n = now();
       if (a && a.released) return `<b>${a.result.score} من ${a.result.total}</b>`;
       if (a && a.submitted) return '<span class="muted small">تم التسليم</span>';
+      if (a && expired(a, e, n)) return '<span class="muted small">انتهى وقتك</span>';
       if (!a && n < e.start) return `<span class="muted small">يبدأ ${fm(e.start)}</span>`;
       if (n > e.end) return '<span class="muted small">انتهى</span>';
       return `<button class="btn p sm" type="button" data-sx="${p.id}">${a ? "كمّل" : "ابدأ"}</button>`;
@@ -128,12 +140,12 @@ export async function renderStudent(el, uid, d){
     };
     const extra = p => {
       const e = exs[p.id], a = atts[p.id]; if (p.type !== "exam" || !e || !a || !a.released) return "";
-      return (e.materials || []).map(m => safe(m.url) ? `<a class="lnk" style="display:block;margin-top:6px" href="${safe(m.url)}" target="_blank" rel="noopener">${esc(m.title)}</a>` : "").join("") + `<button class="btn s sm" type="button" data-rv="${p.id}" style="margin-top:8px">ورقتي${e.reviewUntil > Date.now() ? " وطلب مراجعة" : ""}</button>`;
+      return (e.materials || []).map(m => safe(m.url) ? `<a class="lnk" style="display:block;margin-top:6px" href="${safe(m.url)}" target="_blank" rel="noopener">${esc(m.title)}</a>` : "").join("") + `<button class="btn s sm" type="button" data-rv="${p.id}" style="margin-top:8px">ورقتي${e.reviewUntil > now() ? " وطلب مراجعة" : ""}</button>`;
     };
     const row = (p, lk) => `<div class="item${lk ? " lk" : ""}"><div class="lrow"><span class="ic">${ic(lk ? "lock" : TYPES[p.type][1])}</span><div class="lt"><b>${esc(p.title)}</b><small>${TYPES[p.type][0]}${lk ? " · يفتح بعد اللي قبله" : p.type === "exam" && exs[p.id] ? ` · ${exs[p.id].duration} دقيقة` : ""}</small></div>${lk ? "" : act(p)}</div>${lk ? "" : extra(p)}</div>`;
     el.innerHTML = `<div class="card"><button id="bk" class="lnk" type="button">${ic("back", 18)} رجوع</button><h2 class="h" style="margin-top:10px">${esc(l.teacherName)} · ${esc(l.subject)}</h2>${l.groupName ? `<p class="muted small">${esc(l.groupName)}</p>` : ""}</div>${lects.length ? lects.map(x => `<div class="card" style="margin-top:14px"><b>${esc(x.title)}</b>${x.parts.length ? x.parts.map((p, i) => row(p, x.mode !== "open" && i > 0 && !done(x.parts[i - 1]))).join("") : '<p class="muted small">لسه مفيش أجزاء.</p>'}</div>`).join("") : '<div class="card" style="margin-top:14px"><p class="muted center">المدرس لسه ما أضافش محاضرات.</p></div>'}`;
     $("#bk", el).onclick = home;
-    const back = () => teacher(l);
+    const backE = () => teacher(l, []), backH = () => teacher(l, ["S"]), backA = () => teacher(l, ["A"]);
     const explain = p => {
       const items = (p.media || (p.url ? [{u: p.url, t: "link", n: "رابط"}] : [])).filter(okMedia);
       const vidN = items.filter(m => m.t === "video" || m.t === "yt").length;
@@ -194,17 +206,25 @@ export async function renderStudent(el, uid, d){
       paint(false); dirty = false;
       tm = setInterval(() => persist(), 60000);
       document.addEventListener("visibilitychange", vis);
-      $("#bk", el).onclick = () => leave().then(back);
-      const dn = $("#dn", el); if (dn) dn.onclick = () => run(async () => { prog[p.id] = 1; await persist(true); back(); });
+      $("#bk", el).onclick = () => leave().then(backE);
+      const dn = $("#dn", el); if (dn) dn.onclick = () => run(async () => { prog[p.id] = 1; await persist(true); backE(); });
     };
     el.querySelectorAll("[data-ev]").forEach(b => b.onclick = () => explain(pmap[b.dataset.ev]));
-    el.querySelectorAll("[data-hw]").forEach(b => b.onclick = () => hwStudent(el, uid, l.teacherUid, hws[b.dataset.hw], subs[b.dataset.hw], back));
-    el.querySelectorAll("[data-sx]").forEach(b => b.onclick = () => examSolve(el, uid, exs[b.dataset.sx], atts[b.dataset.sx], back, d.name));
-    el.querySelectorAll("[data-rv]").forEach(b => b.onclick = () => review(exs[b.dataset.rv], atts[b.dataset.rv], back));
+    el.querySelectorAll("[data-hw]").forEach(b => b.onclick = () => hwStudent(el, uid, l.teacherUid, hws[b.dataset.hw], subs[b.dataset.hw], backH));
+    el.querySelectorAll("[data-sx]").forEach(b => b.onclick = () => examSolve(el, uid, exs[b.dataset.sx], atts[b.dataset.sx], backA, d.name));
+    el.querySelectorAll("[data-rv]").forEach(b => b.onclick = () => review(exs[b.dataset.rv], atts[b.dataset.rv], backE));
   }
 
-  function review(e, a, back){
-    const R = a.result || {}, per = R.per, key = R.key, open = e.reviewUntil > Date.now();
+  async function review(e, a, back){
+    if (!e.questions) {
+      el.innerHTML = '<p class="muted center">جاري التحميل…</p>';
+      try { const p = await getDoc(doc(db, "exams", e.id, "paper", "main")); e.questions = p.exists() ? (p.data().questions || []) : []; }
+      catch (er) { toast("تعذّر تحميل الأسئلة"); return back(); }
+    }
+    reviewDraw(e, a, back);
+  }
+  function reviewDraw(e, a, back){
+    const R = a.result || {}, per = R.per, key = R.key, open = e.reviewUntil > now();
     const show = q => { const v = (a.answers || {})[q.id]; return v == null || v === "" ? "—" : q.type === "mcq" ? esc(q.options[v]) : q.type === "tf" ? (v ? "صح" : "خطأ") : esc(v); };
     const keyTxt = q => { const k = key && key[q.id]; return k == null ? "" : q.type === "mcq" ? esc(q.options[k]) : k ? "صح" : "خطأ"; };
     const mark = q => { if (!per || per[q.id] == null) return ""; const x = per[q.id]; return x >= q.points ? `<span class="okm">✓ ${x} من ${q.points}</span>` : x > 0 ? `<span class="pm">◐ ${x} من ${q.points}</span>` : `<span class="badm">✗ 0 من ${q.points}</span>`; };
