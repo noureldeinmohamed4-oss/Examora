@@ -102,6 +102,12 @@ export async function renderStudent(el, uid, d){
         const s = await getDocs(query(collection(db, "lectures"), where("teacherUid", "==", l.teacherUid), where("groupId", "==", l.groupId), where("hidden", "==", false)));
         lects = s.docs.map(x => ({id: x.id, ...x.data()})).sort((a, b) => a.order - b.order);
       } catch (e) { return fail("تعذّر تحميل المحاضرات. ممكن المدرس يكون نقلك أو مسح المجموعة، أو اتأكد من الإنترنت."); }
+      /* محاضرات اتشاركت معاك بالاسم (المدرس اختارك) */
+      try {
+        const S2 = await getDocs(query(collection(db, "shares"), where("studentUid", "==", uid), where("teacherUid", "==", l.teacherUid)));
+        const sh = await Promise.all(S2.docs.map(async x => { try { const z = await getDoc(doc(db, "lectures", x.data().lectureId)); return z.exists() ? {id: z.id, ...z.data()} : null; } catch (e) { return null; } }));
+        lects = [...lects, ...sh.filter(z => z && z.hidden === false && z.groupId === "__shared" && z.teacherUid === l.teacherUid)].sort((p, q) => p.order - q.order);
+      } catch (e) {}
       const [E, H, A, S, P] = await Promise.all([
         g("exams", where("teacherUid", "==", l.teacherUid), where("published", "==", true)),
         g("homeworks", where("teacherUid", "==", l.teacherUid)),
