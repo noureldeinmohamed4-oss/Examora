@@ -186,17 +186,15 @@ export async function renderStudent(el, uid, d){
           sb.disabled = true; sb.textContent = "جاري التحميل…";
           ytReady().then(() => {
             if (dead) return;
-            $("#yw" + i, el).innerHTML = '<div id="y' + i + '"></div><div class="ytcv" id="yv' + i + '"><span>جاري التشغيل…</span></div><div class="ytblk t"></div><div class="ytblk b"></div>';
-            let started = false;
+            $("#yw" + i, el).innerHTML = '<div id="y' + i + '"></div><div class="ytcv" id="yv' + i + '"><span>جاري التشغيل…</span></div><div class="ytmt" id="ym' + i + '" hidden></div>';
+            let started = false, tmo = null;
             const setCv = (on, txt) => { const v = $("#yv" + i, el); if (!v) return; v.hidden = !on; if (txt && v.firstChild) v.firstChild.textContent = txt; };
-            const ERRM = {2: "رابط الفيديو غير صحيح", 5: "حصلت مشكلة في تشغيل الفيديو، حاول تاني", 100: "الفيديو خاص أو محذوف", 101: "صاحب الفيديو مانع تشغيله هنا", 150: "صاحب الفيديو مانع تشغيله هنا", 153: "تعذّر تشغيل الفيديو، حاول تاني"};
-            const pl = new window.YT.Player("y" + i, {width: "100%", height: "100%", videoId: m.id, playerVars: {autoplay: 1, controls: 1, fs: 0, rel: 0, modestbranding: 1, iv_load_policy: 3, cc_load_policy: 0, playsinline: 1, origin: location.origin}, events: {onReady: e => { try { e.target.playVideo(); } catch (er) {} }, onError: e => { setCv(true, ERRM[e.data] || "تعذّر تشغيل الفيديو"); }, onStateChange: e => {
+            const topMask = on => { const v = $("#ym" + i, el); if (v) v.hidden = !on; };
+            const pl = new window.YT.Player("y" + i, {width: "100%", height: "100%", videoId: m.id, playerVars: {autoplay: 1, controls: 0, disablekb: 1, fs: 0, rel: 0, modestbranding: 1, iv_load_policy: 3, cc_load_policy: 0, playsinline: 1, origin: location.origin}, events: {onReady: e => { try { e.target.playVideo(); } catch (er) {} }, onStateChange: e => {
               const st = e.data, b = $("#pp" + i, el); if (b) b.textContent = st === 1 ? "⏸ إيقاف" : "▶ تشغيل";
-              if (st === 1) { started = true; setCv(false); }
+              if (st === 1) { started = true; setCv(false); topMask(true); clearTimeout(tmo); tmo = setTimeout(() => topMask(false), 6000); }
               else if (st === 3) { if (!started) setCv(true, "جاري التشغيل…"); }
-              else if (st === 0) setCv(true, "انتهى الفيديو · دوس للإعادة");
-              else if (st === 2) setCv(false);
-              else if (!started) setCv(true, "جاري التشغيل…");
+              else { clearTimeout(tmo); topMask(false); setCv(true, st === 0 ? "انتهى الفيديو · دوس للإعادة" : st === 2 ? "⏸ متوقف · دوس للمتابعة" : "جاري التشغيل…"); }
             }}});
             trk.push({i, tr: trackYT(pl, w[i], paint), pl});
             const cv = $("#yv" + i, el); if (cv) cv.onclick = () => { try { pl.playVideo(); } catch (er) {} };
