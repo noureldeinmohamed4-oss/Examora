@@ -6,6 +6,19 @@ import {hwStudent} from "./homework.js";
 import {isCl, urlImgs} from "./media.js";
 import {now, finished, expired} from "./time.js";
 
+const YS = (p, f) => `<svg viewBox="0 0 24 24" width="${f || 20}" height="${f || 20}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p}</svg>`;
+const YI = {
+  play: '<svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>',
+  pause: '<svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden="true"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>',
+  back: YS('<path d="M9 14l-4 -4l4 -4"/><path d="M5 10h11a4 4 0 1 1 0 8h-1"/>', 18),
+  fwd: YS('<path d="M15 14l4 -4l-4 -4"/><path d="M19 10h-11a4 4 0 1 0 0 8h1"/>', 18),
+  max: YS('<path d="M4 8v-2a2 2 0 0 1 2 -2h2"/><path d="M4 16v2a2 2 0 0 0 2 2h2"/><path d="M16 4h2a2 2 0 0 1 2 2v2"/><path d="M16 20h2a2 2 0 0 0 2 -2v-2"/>', 18),
+  replay: YS('<path d="M20 11a8.1 8.1 0 0 0 -15.5 -2m-.5 -4v4h4"/><path d="M4 13a8.1 8.1 0 0 0 15.5 2m.5 4v-4h-4"/>', 16),
+  alert: YS('<path d="M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0"/><path d="M12 8v4"/><path d="M12 16h.01"/>', 30)
+};
+const YL = '<span class="yl">E</span>';
+const YERR = {2: "رابط الفيديو غير صحيح", 5: "حصلت مشكلة في تشغيل الفيديو، حاول تاني", 100: "الفيديو خاص أو محذوف", 101: "صاحب الفيديو مانع تشغيله هنا", 150: "صاحب الفيديو مانع تشغيله هنا", 153: "تعذّر تشغيل الفيديو، حاول تاني"};
+
 const TYPES = {explain: ["شرح", "vid"], homework: ["واجب", "doc"], exam: ["امتحان", "exam"]};
 const fm = ms => new Date(ms).toLocaleString("ar-EG", {dateStyle: "medium", timeStyle: "short"});
 const gnm = g => g.grade === "غير محدد" ? (g.label || "") : g.grade + (g.label ? " · " + g.label : "");
@@ -176,26 +189,35 @@ export async function renderStudent(el, uid, d){
       const vis = () => { if (document.hidden) persist(); };
       const leave = () => { dead = true; clearInterval(tm); document.removeEventListener("visibilitychange", vis); trk.forEach(t => { try { t.tr.stop && t.tr.stop(); t.pl && t.pl.destroy(); } catch (e) {} }); return persist(); };
       const hasVid = vidN > 0, canFs = !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
-      el.innerHTML = `<div class="card"><button id="bk" class="lnk" type="button">${ic("back", 18)} رجوع</button><h2 class="h" style="margin-top:10px">${esc(p.title)}</h2>${items.length ? items.map((m, i) => m.t === "video" ? `<div class="item"><b>${esc(nmv(m))}</b><video class="vp" controls playsinline preload="metadata" src="${esc(m.u)}" data-v="${i}"></video><div class="bar"><i id="b${i}"></i></div><small class="muted" id="t${i}"></small></div>` : m.t === "yt" ? `<div class="item"><b>${esc(nmv(m))}</b><div class="ytw" id="yw${i}"><button class="ytstart" type="button" id="ys${i}">▶ ابدأ المشاهدة</button></div><div class="ytc" id="yc${i}" hidden><button class="btn s sm" type="button" id="pp${i}">▶ تشغيل</button><button class="btn s sm" type="button" id="rw${i}">↺ 10ث</button><button class="btn s sm" type="button" id="fw${i}">10ث ↻</button><select class="plain" id="rt${i}" aria-label="السرعة"><option value="0.75">0.75x</option><option value="1" selected>1x</option><option value="1.25">1.25x</option><option value="1.5">1.5x</option><option value="2">2x</option></select>${canFs ? `<button class="btn s sm" type="button" id="fs${i}">ملء الشاشة</button>` : ""}</div><div class="bar"><i id="b${i}"></i></div><small class="muted" id="t${i}"></small></div>` : `<div class="item"><a class="btn s sm" style="text-decoration:none" href="${esc(m.u)}" target="_blank" rel="noopener">${m.t === "pdf" ? "فتح الملف (PDF)" : "فتح الرابط"}${m.n ? " · " + esc(m.n) : ""}</a></div>`).join("") : '<p class="muted center">المدرس لسه ما رفعش المحتوى.</p>'}<p id="st" class="muted small">${prog[p.id] ? "✓ تم احتساب الجزء ده" : hasVid ? "الجزء بيتحسب لما تشاهد 90% من الفيديو فعلياً. التقديم مش بيتحسب." : ""}</p>${!hasVid && items.length && !prog[p.id] ? '<button id="dn" class="btn p full" type="button">تم</button>' : ""}</div>`;
+      el.innerHTML = `<div class="card"><button id="bk" class="lnk" type="button">${ic("back", 18)} رجوع</button><h2 class="h" style="margin-top:10px">${esc(p.title)}</h2>${items.length ? items.map((m, i) => m.t === "video" ? `<div class="item"><b>${esc(nmv(m))}</b><video class="vp" controls playsinline preload="metadata" src="${esc(m.u)}" data-v="${i}"></video><div class="bar"><i id="b${i}"></i></div><small class="muted" id="t${i}"></small></div>` : m.t === "yt" ? `<div class="item"><b>${esc(nmv(m))}</b><div class="ytw" id="yw${i}"><button class="ytstart" type="button" id="ys${i}">${YL}<span class="ytpb">${YI.play}</span><span class="yls">ابدأ المشاهدة</span></button></div><div class="ytc" id="yc${i}" hidden><button class="ytp" type="button" id="pp${i}" aria-label="تشغيل">${YI.play}</button><button class="ytb" type="button" id="rw${i}" aria-label="رجوع 10 ثواني">${YI.back}10</button><button class="ytb" type="button" id="fw${i}" aria-label="تقديم 10 ثواني">10${YI.fwd}</button><select class="plain ytsp" id="rt${i}" aria-label="السرعة"><option value="0.75">0.75x</option><option value="1" selected>1x</option><option value="1.25">1.25x</option><option value="1.5">1.5x</option><option value="2">2x</option></select>${canFs ? `<button class="ytb ytf" type="button" id="fs${i}" aria-label="ملء الشاشة">${YI.max}</button>` : ""}</div><div class="bar yb"><i id="b${i}"></i><u class="ytmk"></u></div><small class="muted" id="t${i}"></small></div>` : `<div class="item"><a class="btn s sm" style="text-decoration:none" href="${esc(m.u)}" target="_blank" rel="noopener">${m.t === "pdf" ? "فتح الملف (PDF)" : "فتح الرابط"}${m.n ? " · " + esc(m.n) : ""}</a></div>`).join("") : '<p class="muted center">المدرس لسه ما رفعش المحتوى.</p>'}<p id="st" class="muted small">${prog[p.id] ? "✓ تم احتساب الجزء ده" : hasVid ? "الجزء بيتحسب لما تشاهد 90% من الفيديو فعلياً. التقديم مش بيتحسب." : ""}</p>${!hasVid && items.length && !prog[p.id] ? '<button id="dn" class="btn p full" type="button">تم</button>' : ""}</div>`;
       el.querySelectorAll("video[data-v]").forEach(v => { const i = +v.dataset.v; trk.push({i, tr: track(v, w[i], paint)}); v.addEventListener("loadedmetadata", () => paint(false)); });
       const yts = items.map((m, i) => ({m, i})).filter(x => x.m.t === "yt");
       if (yts.length) ytReady().catch(() => {});
       yts.forEach(({m, i}) => {
         const sb = $("#ys" + i, el);
         sb.onclick = () => {
-          sb.disabled = true; sb.textContent = "جاري التحميل…";
+          sb.disabled = true; const lb = sb.querySelector(".yls"); if (lb) lb.textContent = "جاري التحميل…";
           ytReady().then(() => {
             if (dead) return;
-            $("#yw" + i, el).innerHTML = '<div id="y' + i + '"></div><div class="ytcv" id="yv' + i + '"><span>جاري التشغيل…</span></div><div class="ytmt" id="ym' + i + '" hidden></div>';
+            const COV = {
+              load: () => YL + '<span>جاري التحميل…</span><i class="ysp"></i>',
+              end: () => YL + '<span>انتهى الفيديو</span>' + (prog[p.id] ? '<small>✓ تم احتساب الجزء</small>' : '') + '<span class="yrp">' + YI.replay + 'إعادة المشاهدة</span>',
+              err: msg => '<span class="yer">' + YI.alert + '</span><span>' + esc(msg) + '</span><small class="yh">بلّغ المدرس عشان يغيّر الفيديو</small>'
+            };
+            $("#yw" + i, el).innerHTML = '<div id="y' + i + '"></div><div class="ytpz" id="yz' + i + '" hidden><div class="ytbd t"></div><div class="ytbd b"></div><span class="ytpb">' + YI.play + '</span></div><div class="ytmt" id="ym' + i + '" hidden>' + esc(p.title) + '</div><div class="ytcv" id="yv' + i + '">' + COV.load() + '</div>';
             let started = false, tmo = null;
-            const setCv = (on, txt) => { const v = $("#yv" + i, el); if (!v) return; v.hidden = !on; if (txt && v.firstChild) v.firstChild.textContent = txt; };
+            const setCv = (on, html) => { const v = $("#yv" + i, el); if (!v) return; v.hidden = !on; if (html != null) v.innerHTML = html; };
             const topMask = on => { const v = $("#ym" + i, el); if (v) v.hidden = !on; };
-            const pl = new window.YT.Player("y" + i, {width: "100%", height: "100%", videoId: m.id, playerVars: {autoplay: 1, controls: 0, disablekb: 1, fs: 0, rel: 0, modestbranding: 1, iv_load_policy: 3, cc_load_policy: 0, playsinline: 1, origin: location.origin}, events: {onReady: e => { try { e.target.playVideo(); } catch (er) {} }, onStateChange: e => {
-              const st = e.data, b = $("#pp" + i, el); if (b) b.textContent = st === 1 ? "⏸ إيقاف" : "▶ تشغيل";
-              if (st === 1) { started = true; setCv(false); topMask(true); clearTimeout(tmo); tmo = setTimeout(() => topMask(false), 6000); }
-              else if (st === 3) { if (!started) setCv(true, "جاري التشغيل…"); }
-              else { clearTimeout(tmo); topMask(false); setCv(true, st === 0 ? "انتهى الفيديو · دوس للإعادة" : st === 2 ? "⏸ متوقف · دوس للمتابعة" : "جاري التشغيل…"); }
+            const pz = on => { const v = $("#yz" + i, el); if (v) v.hidden = !on; };
+            const pl = new window.YT.Player("y" + i, {width: "100%", height: "100%", videoId: m.id, playerVars: {autoplay: 1, controls: 0, disablekb: 1, fs: 0, rel: 0, modestbranding: 1, iv_load_policy: 3, cc_load_policy: 0, playsinline: 1, origin: location.origin}, events: {onReady: e => { try { e.target.playVideo(); } catch (er) {} }, onError: e => { clearTimeout(tmo); topMask(false); pz(false); setCv(true, COV.err(YERR[e.data] || "تعذّر تشغيل الفيديو")); }, onStateChange: e => {
+              const st = e.data, b = $("#pp" + i, el); if (b) { b.innerHTML = st === 1 ? YI.pause : YI.play; b.setAttribute("aria-label", st === 1 ? "إيقاف" : "تشغيل"); }
+              if (st === 1) { started = true; setCv(false); pz(false); topMask(true); clearTimeout(tmo); tmo = setTimeout(() => topMask(false), 6000); }
+              else if (st === 3) { if (!started) setCv(true, COV.load()); }
+              else if (st === 0) { clearTimeout(tmo); topMask(false); pz(false); setCv(true, COV.end()); }
+              else if (st === 2) { clearTimeout(tmo); topMask(false); setCv(false); pz(true); }
+              else if (!started) setCv(true, COV.load());
             }}});
+            const zz = $("#yz" + i, el); if (zz) zz.onclick = () => { try { pl.playVideo(); } catch (er) {} };
             trk.push({i, tr: trackYT(pl, w[i], paint), pl});
             const cv = $("#yv" + i, el); if (cv) cv.onclick = () => { try { pl.playVideo(); } catch (er) {} };
             $("#yc" + i, el).hidden = false;
@@ -206,7 +228,7 @@ export async function renderStudent(el, uid, d){
             g("rt").onchange = e => { try { pl.setPlaybackRate(+e.target.value); } catch (er) {} };
             const fs = g("fs"); if (fs) fs.onclick = () => { const x = $("#yw" + i, el), f = x.requestFullscreen || x.webkitRequestFullscreen; if (f) f.call(x); };
             paint(false);
-          }).catch(() => { sb.disabled = false; sb.textContent = "▶ ابدأ المشاهدة"; const st = $("#st", el); if (st) st.textContent = "تعذّر تحميل مشغّل الفيديو. تأكد من الإنترنت وحاول تاني."; });
+          }).catch(() => { sb.disabled = false; const lb2 = sb.querySelector(".yls"); if (lb2) lb2.textContent = "ابدأ المشاهدة"; const st = $("#st", el); if (st) st.textContent = "تعذّر تحميل مشغّل الفيديو. تأكد من الإنترنت وحاول تاني."; });
         };
       });
       paint(false); dirty = false;

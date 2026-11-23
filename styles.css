@@ -161,3 +161,35 @@ input:focus-visible,select:focus-visible,button:focus-visible{outline:3px solid 
 .exbar.low #tm{animation:pl 1s steps(1) infinite}
 @keyframes pl{50%{opacity:.5}}
 @media (prefers-reduced-motion:reduce){.exbar.low #tm{animation:none}}
+
+/* ===== مشغّل الفيديو (يوتيوب) بتصميم المنصة ===== */
+.ytstart{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;background:#14283B;color:#fff;font-size:15px;font-weight:500;cursor:pointer}
+.ytstart:disabled{opacity:.85}
+.yl{width:44px;height:44px;border-radius:12px;background:#1F4E79;display:grid;place-items:center;font-weight:700;font-size:22px;color:#fff;direction:ltr}
+.ytpb{width:56px;height:56px;border-radius:50%;background:#1FA89A;color:#fff;display:grid;place-items:center}
+.ytstart .ytpb{width:48px;height:48px}
+.ytw>.ytcv{z-index:3;background:#14283B;color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;text-align:center;padding:12px;font-size:15px;font-weight:500;cursor:pointer}
+.ytw>.ytcv[hidden]{display:none}
+.ytcv small{font-size:13px;color:#7fd8cc;font-weight:400}
+.ytcv small.yh{color:#9fb3c8}
+.ytcv .yer{color:#f0b4ae;display:grid}
+.ytcv .yrp{display:inline-flex;align-items:center;gap:6px;font-size:13px;border:1px solid #4a6580;border-radius:10px;padding:6px 12px}
+.ytcv .ysp{display:block;position:relative;width:96px;height:4px;border-radius:99px;background:#2b4560;overflow:hidden;direction:ltr}
+.ytcv .ysp::after{content:"";position:absolute;top:0;bottom:0;left:0;width:40%;background:#1FA89A;animation:ysl 1.1s ease-in-out infinite alternate}
+@keyframes ysl{to{left:60%}}
+.ytw>.ytmt{height:20%;background:#14283B;opacity:.96;display:flex;align-items:center;padding:0 12px;color:#fff;font-size:13px;font-weight:500;pointer-events:none}
+.ytw>.ytmt[hidden]{display:none}
+.ytw>.ytpz{z-index:2;cursor:pointer;background:transparent}
+.ytw>.ytpz[hidden]{display:none}
+.ytpz .ytbd{position:absolute;left:0;right:0;background:#14283B;opacity:.96}
+.ytpz .ytbd.t{top:0;height:22%}
+.ytpz .ytbd.b{bottom:0;height:22%}
+.ytpz .ytpb{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%)}
+.ytc{gap:8px;margin-top:10px;flex-wrap:nowrap}
+.ytc .ytp{flex:none;width:44px;height:44px;border-radius:50%;border:0;background:var(--primary);color:var(--on-primary);display:grid;place-items:center;padding:0}
+.ytc .ytb{flex:none;min-width:44px;height:44px;border-radius:14px;border:0;background:var(--soft);color:var(--primary);display:inline-flex;align-items:center;justify-content:center;gap:3px;font-size:13px;font-weight:600;padding:0 8px}
+.ytc .ytsp{height:44px;padding:0 8px;border-radius:14px}
+.ytc .ytf{margin-inline-start:auto}
+.yb{position:relative}
+.yb .ytmk{position:absolute;top:0;bottom:0;inset-inline-start:90%;width:2px;background:var(--muted);opacity:.55}
+@media (prefers-reduced-motion:reduce){.ytcv .ysp::after{animation:none}}
