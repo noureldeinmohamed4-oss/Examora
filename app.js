@@ -7,22 +7,24 @@ import {renderAdmin} from "./admin.js";
 import {renderTeacher} from "./teacher.js";
 import {renderStudent} from "./student.js";
 import {syncClock} from "./time.js";
+import {openPassword} from "./account.js";
 
 window.__booted = true;
-const app = $("#app"), root = document.documentElement, th = $("#th"), lo = $("#lo"), hb = $("#hb");
+const app = $("#app"), root = document.documentElement, th = $("#th"), lo = $("#lo"), hb = $("#hb"), pwb = $("#pw");
 try { const t = localStorage.getItem("theme"); if (t) root.dataset.theme = t; } catch (e) {}
 const isDark = () => root.dataset.theme ? root.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
 const lab = () => { const d = isDark(); th.setAttribute("aria-checked", d); th.setAttribute("aria-label", d ? "الوضع الداكن" : "الوضع الفاتح"); th.querySelector(".knob").innerHTML = ic(d ? "moon" : "sun", 16); };
 th.onclick = () => { const t = isDark() ? "light" : "dark"; root.dataset.theme = t; try { localStorage.setItem("theme", t); } catch (e) {} lab(); };
 lab();
 lo.innerHTML = ic("out");
+pwb.innerHTML = ic("key"); pwb.onclick = openPassword;
 lo.onclick = () => signOut(auth);
 
 let pt, sessUid = null, unsub = null, clk = false;
 async function route(u){
   if (state.busy) return;
   clearTimeout(pt);
-  lo.hidden = hb.hidden = !u;
+  lo.hidden = hb.hidden = pwb.hidden = !u;
   if (u && !clk) { clk = true; syncClock(); }
   if (!u) { sessUid = null; if (unsub) { unsub(); unsub = null; } if (!$("#f", app)) renderAuth(app, () => route(auth.currentUser)); return; }
   if (u.email === ADMIN_EMAIL) { if (!$("#ls", app)) renderAdmin(app); return; }

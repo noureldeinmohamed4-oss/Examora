@@ -193,3 +193,7 @@ input:focus-visible,select:focus-visible,button:focus-visible{outline:3px solid 
 .yb{position:relative}
 .yb .ytmk{position:absolute;top:0;bottom:0;inset-inline-start:90%;width:2px;background:var(--muted);opacity:.55}
 @media (prefers-reduced-motion:reduce){.ytcv .ysp::after{animation:none}}
+
+/* ===== نافذة تغيير كلمة السر ===== */
+.pwm{position:fixed;inset:0;z-index:70;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;padding:16px;padding-top:calc(16px + env(safe-area-inset-top,0px));padding-bottom:calc(16px + env(safe-area-inset-bottom,0px))}
+.pwm .card{width:100%;max-width:420px}

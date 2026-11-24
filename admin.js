@@ -2,6 +2,7 @@ import {db} from "./firebase.js";
 import {collection, query, where, getDocs, doc, getDoc, setDoc, updateDoc, deleteField} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {$, esc, toast, ic} from "./ui.js";
 import {finished, endAt, fdt, tms} from "./time.js";
+import {SUBJECTS, digits, checkAcc, saveAcc} from "./account.js";
 
 const TABS = [["pending","قيد المراجعة"],["active","مفعّلة"],["suspended","موقوفة"]];
 const TOP = [["acc","الحسابات"],["cnt","المدرسين والمحتوى"],["mnt","صيانة"]];
@@ -15,7 +16,7 @@ const get = async (c, ...w) => (await getDocs(query(collection(db, c), ...w))).d
 const back = (id, t = "رجوع") => `<button id="${id}" class="lnk" type="button">${ic("back", 18)} ${t}</button>`;
 
 export function renderAdmin(el){
-  let sec = "acc";
+  let sec = "acc", accTab = "pending";
   el.innerHTML = `<div class="card"><h2 class="h">لوحة الأدمن</h2><div class="tabs" id="top"></div></div><div id="ls" style="margin-top:14px"></div>`;
   const top = $("#top", el), body = $("#ls", el);
   const drawTop = () => {
@@ -25,18 +26,19 @@ export function renderAdmin(el){
 
   /* ---------- الحسابات ---------- */
   function accounts(){
-    let tab = "pending", rows = [], q = "";
+    let tab = accTab, rows = [], q = "";
     body.innerHTML = `<div class="card"><div class="tabs" id="tb"></div><input id="q" placeholder="بحث بالاسم أو الرقم"><div id="al"></div></div>`;
     const al = $("#al", body), tb = $("#tb", body);
     const drawTabs = () => {
       tb.innerHTML = TABS.map(([k,t]) => `<button type="button" data-t="${k}" class="${k===tab?"on":""}">${t}</button>`).join("");
-      tb.querySelectorAll("button").forEach(b => b.onclick = () => { tab = b.dataset.t; drawTabs(); load(); });
+      tb.querySelectorAll("button").forEach(b => b.onclick = () => { tab = accTab = b.dataset.t; drawTabs(); load(); });
     };
     const draw = () => {
       const k = q.trim().toLowerCase();
       const list = rows.filter(r => !k || [r.name, r.phone, r.parentPhone, r.email].some(x => String(x || "").toLowerCase().includes(k)));
       if (!list.length) { al.innerHTML = '<p class="muted center">مفيش حسابات هنا</p>'; return; }
-      al.innerHTML = list.map(r => `<div class="item"><b>${esc(r.name)}</b><small>${r.role==="teacher"?"مدرس · "+esc(r.subject):"طالب"}</small><small>الرقم: ${tel(r.phone)}</small>${r.parentPhone?`<small>ولي الأمر: ${tel(r.parentPhone)}</small>`:""}<small dir="ltr">${esc(r.email)}</small><div class="acts">${tab!=="active"?`<button class="btn p sm" data-id="${r.id}" data-s="active">تفعيل</button>`:""}${tab!=="suspended"?`<button class="btn s sm" data-id="${r.id}" data-s="suspended">إيقاف</button>`:""}</div></div>`).join("");
+      al.innerHTML = list.map(r => `<div class="item"><b>${esc(r.name)}</b><small>${r.role==="teacher"?"مدرس · "+esc(r.subject):"طالب"}</small><small>الرقم: ${tel(r.phone)}</small>${r.parentPhone?`<small>ولي الأمر: ${tel(r.parentPhone)}</small>`:""}<small dir="ltr">${esc(r.email)}</small><div class="acts">${tab!=="active"?`<button class="btn p sm" data-id="${r.id}" data-s="active">تفعيل</button>`:""}${tab!=="suspended"?`<button class="btn s sm" data-id="${r.id}" data-s="suspended">إيقاف</button>`:""}<button class="btn s sm" type="button" data-ed="${r.id}">تعديل</button></div></div>`).join("");
+      al.querySelectorAll("[data-ed]").forEach(b => b.onclick = () => editAcc(rows.find(x => x.id === b.dataset.ed)));
       al.querySelectorAll("[data-id]").forEach(b => b.onclick = async () => {
         if (b.dataset.s === "suspended" && !confirm("متأكد من الإيقاف؟")) return;
         b.disabled = true;
@@ -55,6 +57,31 @@ export function renderAdmin(el){
     }
     $("#q", body).oninput = e => { q = e.target.value; draw(); };
     drawTabs(); load();
+  }
+
+
+  /* ---------- تعديل بيانات حساب ---------- */
+  function editAcc(r){
+    if (!r) return;
+    const st = r.role === "student", subs = SUBJECTS.includes(r.subject) || !r.subject ? SUBJECTS : [r.subject, ...SUBJECTS];
+    body.innerHTML = `<div class="card">${back("bk")}<h2 class="h" style="margin-top:10px">تعديل ${st ? "طالب" : "مدرس"}</h2>
+<label class="lb">الاسم</label><input id="en" class="plain" value="${esc(r.name)}">
+<label class="lb">الرقم</label><input id="ep" class="plain" inputmode="numeric" dir="ltr" value="${esc(r.phone || "")}">
+${st ? `<label class="lb">رقم ولي الأمر</label><input id="ev" class="plain" inputmode="numeric" dir="ltr" value="${esc(r.parentPhone || "")}">` : `<label class="lb">المادة</label><select id="es" class="plain">${subs.map(x => `<option${x === r.subject ? " selected" : ""}>${esc(x)}</option>`).join("")}</select>`}
+<label class="lb">الإيميل (للقراءة فقط)</label><input class="plain" dir="ltr" value="${esc(r.email || "")}" readonly>
+<p class="muted small">الإيميل بيتغيّر من Firebase Console بس، لأن الدخول بيعتمد عليه.</p>
+<button id="sv" class="btn p full" type="button">حفظ</button><p id="em" class="err" role="alert"></p></div>`;
+    $("#bk", body).onclick = accounts;
+    $("#sv", body).onclick = async () => {
+      const v = {name: $("#en", body).value.trim().replace(/\s+/g, " "), phone: digits($("#ep", body).value)};
+      if (st) v.parent = digits($("#ev", body).value); else v.subject = $("#es", body).value;
+      const m = $("#em", body), bad = checkAcc(r, v);
+      if (bad) { m.textContent = bad; return; }
+      if (!confirm("تحديث بيانات " + r.name + "؟")) return;
+      const b = $("#sv", body); b.disabled = true; m.textContent = "";
+      try { await saveAcc(r, v); toast("تم الحفظ"); accounts(); }
+      catch (e) { m.textContent = e && e.ui ? e.message : "حصل خطأ: " + ((e && e.code) || "unknown") + ". اتأكد إن القواعد الجديدة منشورة."; b.disabled = false; }
+    };
   }
 
   /* ---------- المدرسين ---------- */
