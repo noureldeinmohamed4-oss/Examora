@@ -69,7 +69,7 @@ export function renderAdmin(el){
 <label class="lb">الرقم</label><input id="ep" class="plain" inputmode="numeric" dir="ltr" value="${esc(r.phone || "")}">
 ${st ? `<label class="lb">رقم ولي الأمر</label><input id="ev" class="plain" inputmode="numeric" dir="ltr" value="${esc(r.parentPhone || "")}">` : `<label class="lb">المادة</label><select id="es" class="plain">${subs.map(x => `<option${x === r.subject ? " selected" : ""}>${esc(x)}</option>`).join("")}</select>`}
 <label class="lb">الإيميل (للقراءة فقط)</label><input class="plain" dir="ltr" value="${esc(r.email || "")}" readonly>
-<p class="muted small">الإيميل بيتغيّر من Firebase Console بس، لأن الدخول بيعتمد عليه.</p>
+<p class="muted small">الإيميل بيغيّره صاحب الحساب بنفسه من الإعدادات (برابط تحقق)، لأن الدخول بيعتمد عليه.</p>
 <button id="sv" class="btn p full" type="button">حفظ</button><p id="em" class="err" role="alert"></p></div>`;
     $("#bk", body).onclick = accounts;
     $("#sv", body).onclick = async () => {
