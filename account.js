@@ -32,6 +32,21 @@ export async function requestEmailChange(cur, email){
   await verifyBeforeUpdateEmail(u, email);
 }
 
+/* ---------- صاحب الحساب يغيّر رقمه بس (الاسم ورقم ولي الأمر للأدمن) ---------- */
+export async function savePhone(r, np){
+  if (r.parentPhone && np === r.parentPhone) throw ee("رقمك لازم يكون غير رقم ولي الأمر");
+  if (np !== (r.phone || "")) {
+    const s = await getDoc(doc(db, "phones", np));
+    if (s.exists() && s.data().uid !== r.uid) throw ee("الرقم ده مسجّل عند حساب تاني");
+    if (!s.exists()) await setDoc(doc(db, "phones", np), {uid: r.uid, email: r.email});
+  }
+  await updateDoc(doc(db, "private", r.uid), {phone: np});
+  if (r.phone && r.phone !== np) {
+    const o = await getDoc(doc(db, "phones", r.phone));
+    if (o.exists() && o.data().uid === r.uid) await deleteDoc(doc(db, "phones", r.phone));
+  }
+}
+
 /* ---------- تعديل الأدمن لبيانات حساب ---------- */
 export function checkAcc(r, v){
   const st = r.role === "student";

@@ -8,13 +8,21 @@ import {renderTeacher} from "./teacher.js";
 import {renderStudent} from "./student.js";
 import {renderSettings} from "./settings.js";
 import {syncClock} from "./time.js";
-import {initTheme} from "./theme.js";
+import {initTheme, onTheme, setMode} from "./theme.js";
 import {openMenu, closeMenu} from "./menu.js";
 
 window.__booted = true;
-const app = $("#app"), hb = $("#hb"), mn = $("#mn");
+const app = $("#app"), root = document.documentElement, th = $("#th"), lo = $("#lo"), hb = $("#hb"), mn = $("#mn");
 const RN = {student: "طالب", teacher: "مدرس", admin: "أدمن"};
+/* مفتاح الشمس والقمر زي ما كان. التلقائي بالوقت شغّال لحد ما الطالب يقلبه بنفسه */
+const isDark = () => root.dataset.theme === "dark";
+const lab = () => { const d = isDark(); th.setAttribute("aria-checked", d); th.setAttribute("aria-label", d ? "الوضع الداكن" : "الوضع الفاتح"); th.querySelector(".knob").innerHTML = ic(d ? "moon" : "sun", 16); };
+th.onclick = () => { setMode(isDark() ? "light" : "dark"); lab(); };
+onTheme(lab);
 initTheme();
+lab();
+lo.innerHTML = ic("out");
+lo.onclick = () => signOut(auth);
 mn.innerHTML = ic("menu", 22);
 
 let me = null, page = "home";   /* me = {uid, role, d, status} */
@@ -28,13 +36,13 @@ const home = () => {
   else if (me.role === "student") renderStudent(app, me.uid, me.d);
   else renderTeacher(app, me.uid, me.d);
 };
-const settings = () => { if (!me) return; page = "settings"; renderSettings(app, me, home, n => { me.d.name = n; }); };
+const settings = () => { if (!me) return; page = "settings"; renderSettings(app, me, home); };
+const updMn = () => { mn.hidden = !(me && me.status === "active"); };
 mn.onclick = () => {
   const items = [];
-  if (me) {
+  if (me && me.status === "active") {
     items.push({label: "الرئيسية", icon: "home", on: home, active: page === "home"});
-    if (me.status === "active") items.push({label: "الإعدادات", icon: "gear", on: settings, active: page === "settings"});
-    items.push({label: "تسجيل الخروج", icon: "out", on: () => signOut(auth), out: true});
+    items.push({label: "الإعدادات", icon: "gear", on: settings, active: page === "settings"});
   }
   openMenu({name: me ? me.d.name || "" : "", role: me ? RN[me.role] || "" : "", items});
 };
@@ -60,10 +68,10 @@ let pt, sessUid = null, unsub = null, clk = false;
 async function route(u){
   if (state.busy) return;
   clearTimeout(pt);
-  hb.hidden = !u;
+  lo.hidden = hb.hidden = !u;
   if (u && !clk) { clk = true; syncClock(); }
-  if (!u) { me = null; page = "home"; closeMenu(); sessUid = null; if (unsub) { unsub(); unsub = null; } if (!$("#f", app)) renderAuth(app, () => route(auth.currentUser)); return; }
-  if (u.email === ADMIN_EMAIL) { me = {uid: u.uid, role: "admin", d: {name: "الأدمن"}, status: "active"}; if (page === "home" && !$("#ls", app)) renderAdmin(app); return; }
+  if (!u) { me = null; page = "home"; updMn(); closeMenu(); sessUid = null; if (unsub) { unsub(); unsub = null; } if (!$("#f", app)) renderAuth(app, () => route(auth.currentUser)); return; }
+  if (u.email === ADMIN_EMAIL) { me = {uid: u.uid, role: "admin", d: {name: "الأدمن"}, status: "active"}; updMn(); if (page === "home" && !$("#ls", app)) renderAdmin(app); return; }
   if (sessUid !== u.uid) { sessUid = u.uid; if (unsub) unsub(); const SID = crypto.randomUUID(); setDoc(doc(db, "sessions", u.uid), {sid: SID, at: serverTimestamp()}).then(() => { unsub = onSnapshot(doc(db, "sessions", u.uid), s => { if (s.exists() && s.data().sid !== SID) { alert("الحساب اتفتح من جهاز تاني"); signOut(auth); } }); }).catch(() => {}); }
   let s;
   try { s = await getDoc(doc(db, "users", u.uid)); }
@@ -71,6 +79,7 @@ async function route(u){
   if (!s.exists()) { app.innerHTML = '<p class="center err">الحساب غير مكتمل. اخرج وسجّل من جديد.</p>'; return; }
   const d = s.data();
   me = {uid: u.uid, role: d.role, d, status: d.status};
+  updMn();
   if (d.status === "pending") { if (page === "home") app.innerHTML = pendingHtml; pt = setTimeout(() => route(auth.currentUser), 30000); }
   else if (d.status === "suspended") { if (page === "home") app.innerHTML = offHtml; }
   else if (d.role === "student") { syncEmail(u); if (page === "home" && !$(".stu", app)) renderStudent(app, u.uid, d); }
