@@ -229,3 +229,8 @@ input:focus-visible,select:focus-visible,button:focus-visible{outline:3px solid 
 .sed{padding:0 14px 14px}
 .sed[hidden]{display:none}
 .sed .plain,.sed .fld{margin-bottom:8px}
+
+/* ===== بصمة الطالب فوق الفيديو ===== */
+.vwm{z-index:4;pointer-events:none;overflow:hidden}
+.vwm span{position:absolute;white-space:nowrap;max-width:96%;font-size:12px;font-weight:600;color:#fff;opacity:.22;text-shadow:0 0 3px rgba(0,0,0,.9),0 0 1px #000;transition:top 3s ease-in-out,left 3s ease-in-out,transform 3s ease-in-out;user-select:none;-webkit-user-select:none}
+@media (prefers-reduced-motion:reduce){.vwm span{transition:none}}

@@ -17,6 +17,18 @@ const YI = {
   alert: YS('<path d="M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0"/><path d="M12 8v4"/><path d="M12 16h.01"/>', 30)
 };
 const YL = '<span class="yl">E</span>';
+/* بصمة باسم الطالب ورقمه فوق الفيديو: شفّافة ومتحرّكة. بتردع التسريب لأن أي تسجيل شاشة هيطلع فيه صاحبه */
+function addWm(box, html){
+  if (!box || !html) return;
+  const w = document.createElement("div");
+  w.className = "vwm"; w.setAttribute("aria-hidden", "true");
+  w.innerHTML = [0, 1, 2].map(() => `<span>${html}</span>`).join("");
+  box.appendChild(w);
+  const sp = [...w.children];
+  const place = () => sp.forEach((s, k) => { const p = 5 + Math.random() * 90; s.style.left = p + "%"; s.style.transform = "translateX(-" + p + "%)"; s.style.top = (k * 33 + 4 + Math.random() * 24) + "%"; });
+  place();
+  const id = setInterval(() => { if (!w.isConnected) return clearInterval(id); place(); }, 15000);
+}
 const YERR = {2: "رابط الفيديو غير صحيح", 5: "حصلت مشكلة في تشغيل الفيديو، حاول تاني", 100: "الفيديو خاص أو محذوف", 101: "صاحب الفيديو مانع تشغيله هنا", 150: "صاحب الفيديو مانع تشغيله هنا", 153: "تعذّر تشغيل الفيديو، حاول تاني"};
 
 const TYPES = {explain: ["شرح", "vid"], homework: ["واجب", "doc"], exam: ["امتحان", "exam"]};
@@ -69,6 +81,12 @@ function trackYT(p, init, on){
 export async function renderStudent(el, uid, d){
   let links = [];
   const cache = {};
+  let wmP = null;
+  const wmLabel = () => wmP = wmP || (async () => {
+    let ph = "";
+    try { const z = await getDoc(doc(db, "private", uid)); if (z.exists()) ph = z.data().phone || ""; } catch (e) {}
+    return esc(d.name || "") + (ph ? ` · <bdi dir="ltr">${esc(ph)}</bdi>` : "");
+  })();
   const run = async (fn, ok) => { try { await fn(); if (ok) toast(ok); } catch (e) { toast("حصل خطأ، حاول تاني"); } };
   const load = async () => {
     const s = await getDocs(query(collection(db, "links"), where("studentUid", "==", uid)));
@@ -218,6 +236,7 @@ export async function renderStudent(el, uid, d){
               else if (!started) setCv(true, COV.load());
             }}});
             const zz = $("#yz" + i, el); if (zz) zz.onclick = () => { try { pl.playVideo(); } catch (er) {} };
+            wmLabel().then(h => addWm($("#yw" + i, el), h));
             trk.push({i, tr: trackYT(pl, w[i], paint), pl});
             const cv = $("#yv" + i, el); if (cv) cv.onclick = () => { try { pl.playVideo(); } catch (er) {} };
             $("#yc" + i, el).hidden = false;
